@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   SHARE_MAX_PLAYERS, SHARE_STALE_MS, SHARE_TTL_MS,
   admitGuest, clearGuestReady, closeLobby, createLobby, createShareCode, hostStillHere, markStarted, parseShareLocation,
-  publicShareLobby, reapStaleSeats, releaseGuest, seatDisplayName, seatGuest, setSeatReady, shareBlockers, shareFailureCopy, shareGuestName, shareLaunchReady, shareRoster, shareStartLabel, shareUrl, SHARE_CONNECT_GRACE_MS, touchLobby, touchSeatActivity, withSeatHero,
+  publicShareLobby, reapStaleSeats, releaseGuest, seatDisplayName, seatGuest, setSeatReady, shareBlockers, shareFailureCopy, shareGuestName, shareLaunchReady, shareRoster, shareStartLabel, shareUrl, SHARE_SILENCE_MS, touchLobby, touchSeatActivity, withSeatHero,
 } from '../src/share-link.js';
 import { CLIENT_VERSION, LOBBY_PROTOCOL_VERSION } from '../src/online.js';
 import { createBrowserHub, createMemoryChannelFactory, createSupabaseHub, loadShareIceServers } from '../src/share-bus.js';
@@ -100,22 +100,22 @@ test('a guest clock ahead of the host does not mean the host left', () => {
   assert.equal(admitGuest(skewed, { id: GUEST }, NOW).reason, 'host_left');
 });
 
-test('a ghost connecting seat is named on Start and reaped after the grace', () => {
-  let room = seatGuest(lobby(), { id: GUEST, name: 'Bea', hero: 'scott' }, NOW + 10).lobby;
-  room = seatGuest(room, { id: THIRD, name: 'Commander', hero: 'scott' }, NOW + 20).lobby;
-  const open = new Set([GUEST]);
-  const ready = setSeatReady(setSeatReady(room, GUEST, true, NOW + 30), THIRD, true, NOW + 30);
-  const gate = shareLaunchReady(ready, open);
-  assert.equal(gate.ready, false);
-  assert.equal(shareStartLabel(ready.seats, gate), 'WAITING FOR Commander TO CONNECT');
-  const young = reapStaleSeats(ready, NOW + 20 + SHARE_CONNECT_GRACE_MS - 1, { openIds: open });
-  assert.equal(young.dropped.length, 0);
-  const reaped = reapStaleSeats(ready, NOW + 20 + SHARE_CONNECT_GRACE_MS, { openIds: open });
-  assert.equal(reaped.dropped.length, 1);
-  assert.equal(reaped.dropped[0].id, THIRD);
-  assert.equal(shareLaunchReady(reaped.lobby, open).ready, true);
-  const refreshed = touchSeatActivity(ready, THIRD, NOW + 20 + SHARE_CONNECT_GRACE_MS);
-  assert.equal(reapStaleSeats(refreshed, NOW + 20 + SHARE_CONNECT_GRACE_MS, { openIds: open }).dropped.length, 0);
+test('a silent seat is dropped after five seconds, including one that still looks connected', () => {
+  let room = seatGuest(lobby(), { id: GUEST, name: 'Bea', hero: 'scott' }, NOW).lobby;
+  room = seatGuest(room, { id: THIRD, name: 'Commander', hero: 'scott' }, NOW).lobby;
+  room = {
+    ...room,
+    seats: room.seats.map((seat) => (seat.host ? seat : { ...seat, linked: true, ready: true })),
+  };
+  const open = new Set([GUEST, THIRD]);
+  assert.equal(shareLaunchReady(room, open).ready, true);
+  assert.equal(reapStaleSeats(room, NOW + SHARE_SILENCE_MS - 1).dropped.length, 0);
+  const reaped = reapStaleSeats(room, NOW + SHARE_SILENCE_MS);
+  assert.equal(reaped.dropped.length, 2);
+  const refreshed = touchSeatActivity(room, THIRD, NOW + 4000);
+  const kept = reapStaleSeats(refreshed, NOW + 8000);
+  assert.deepEqual(kept.dropped.map((seat) => seat.id), [GUEST]);
+  assert.equal(kept.lobby.seats.some((seat) => seat.id === THIRD), true);
 });
 
 test('a live heartbeat keeps a guest seated for a full minute without WebRTC', () => {

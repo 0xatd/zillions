@@ -21,6 +21,7 @@ export const SHARE_MAX_PLAYERS = 4;
 export const SHARE_TTL_MS = 2 * 60 * 60 * 1000;
 export const SHARE_STALE_MS = 20000;
 export const SHARE_CONNECT_GRACE_MS = 20000;
+export const SHARE_SILENCE_MS = 5000;
 export const SHARE_ABSENT_MS = 8000;
 export const SHARE_DISCOVER_MS = 8000;
 export const SHARE_HEARTBEAT_MS = 2000;
@@ -117,6 +118,7 @@ export function publicShareLobby(lobby) {
     expiresAt: lobby.expiresAt,
     seenAt: lobby.seenAt,
     started: !!lobby.started,
+    starting: !!lobby.starting,
     closed: !!lobby.closed,
     mode: lobby.mode,
     level: lobby.level,
@@ -207,30 +209,30 @@ export function hostStillHere(lobby, now, { receivedAt = null, hostPresent = fal
 }
 
 // Drop guests the host has not heard from. joinedAt is that clock: a heartbeat
-// (`here`) or any later signal refreshes it. WebRTC can take longer than the
-// grace on a shared NAT, and deleting the seat also destroys the handshake,
-// so a live friend must not be removed just because the data channel is still
-// opening. Presence, when it names real ids, reaps an absent seat sooner.
+// (`here`) or any later signal refreshes it. A linked seat is not immortal.
+// A hidden tab and a slow client keep sending heartbeats from a worker, so
+// they stay. A closed tab stops, and about five seconds of silence removes it.
+// Presence is only a hint: a hidden tab can drop presence while the heartbeat
+// continues, and that tab must stay seated.
 export function reapStaleSeats(lobby, now, {
-  openIds = new Set(),
-  presentIds = null,
-  graceMs = SHARE_CONNECT_GRACE_MS,
-  absentMs = SHARE_ABSENT_MS,
+  silenceMs = SHARE_SILENCE_MS,
 } = {}) {
   if (!lobby || lobby.started) return { lobby, dropped: [] };
   const at = Number(now) || 0;
+  const limit = Number(silenceMs) > 0 ? Number(silenceMs) : SHARE_SILENCE_MS;
   const dropped = [];
   const seats = (lobby.seats || []).filter((seat) => {
-    if (seat.host || openIds.has(seat.id)) return true;
+    if (seat.host) return true;
     const since = Number(seat.joinedAt || lobby.createdAt || 0);
-    const age = at - since;
-    const absent = presentIds ? !presentIds.has(seat.id) : false;
-    if (absent && age >= absentMs) { dropped.push(seat); return false; }
-    if (age >= graceMs) { dropped.push(seat); return false; }
+    if (at - since >= limit) { dropped.push(seat); return false; }
     return true;
   });
   if (!dropped.length) return { lobby, dropped };
   return { lobby: touchLobby({ ...lobby, seats }, at), dropped };
+}
+
+export function markStarting(lobby, now) {
+  return touchLobby({ ...lobby, starting: true }, now);
 }
 
 export function touchSeatActivity(lobby, id, now) {

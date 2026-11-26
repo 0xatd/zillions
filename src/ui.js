@@ -3756,7 +3756,7 @@ export class UI {
     });
   }
 
-  showShareGuest({ status, players, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, ready = false, rejoining = false } = {}) {
+  showShareGuest({ status, players, level = 1, mode = 'campaign', difficulty = 'normal', maxPlayers = 4, ready = false, rejoining = false, starting = false } = {}) {
     this._shareLive = true;
     this._clearBusy();
     this.root.querySelector('#screen-setup')?.classList.add('sharemode');
@@ -3769,7 +3769,7 @@ export class UI {
         <span class="modeeyebrow">DROP-IN CO-OP</span>
         <h3>You are in this siege</h3>
         <p class="mphint" id="share-status"></p>
-        <p class="mphint">${rejoining ? 'Rejoining the match…' : 'Pick your hero, then mark Ready. Changing your hero clears Ready. The host starts for everyone.'}</p>
+        <p class="mphint">${rejoining ? 'Rejoining the match…' : starting ? 'Starting… waiting for players' : 'Pick your hero, then mark Ready. Changing your hero clears Ready. The host starts for everyone.'}</p>
         ${rejoining ? '' : `<div class="share-actions"><button class="diffbtn ${ready ? 'sel' : ''}" id="share-ready" type="button">${ready ? '✓ READY — WAITING FOR HOST' : 'READY FOR BATTLE'}</button></div>`}
       </div>
       <div id="room-roster" class="roomroster"></div>
@@ -3779,9 +3779,9 @@ export class UI {
     if (readyButton) readyButton.onclick = () => this.cb.onShareReady?.(!ready);
     this.roomRoster(players || [], { isHost: false, maxPlayers, level, mode, difficulty });
     this.setStartButton({
-      text: rejoining ? '⏳  REJOINING…' : '⏳  WAITING FOR HOST TO START',
+      text: rejoining ? '⏳  REJOINING…' : starting ? '⏳  STARTING… WAITING FOR PLAYERS' : '⏳  WAITING FOR HOST TO START',
       disabled: true,
-      title: rejoining ? 'Catching up to the host snapshot.' : 'Only the host can launch this siege.',
+      title: rejoining ? 'Catching up to the host snapshot.' : starting ? 'The host is collecting every seated friend.' : 'Only the host can launch this siege.',
     });
   }
 
@@ -3935,7 +3935,7 @@ export class UI {
             <span class="roomseat">${label}</span>
             <b></b>
             <small>${who} · ${state}${unlock}</small>
-            ${isHost && !p.host && p.state !== 'connected' ? `<span class="roomslotactions"><button class="tbtn room-retry" data-user="${p.userId || ''}">Reconnect</button><button class="tbtn room-remove" data-user="${p.userId || ''}">Remove</button></span>` : ''}
+            ${isHost && !p.host ? `<span class="roomslotactions">${p.state !== 'connected' ? `<button type="button" class="tbtn room-retry" data-user="${p.userId || ''}">Reconnect</button>` : ''}<button type="button" class="tbtn room-remove" data-seat="${p.id || ''}" data-user="${p.userId || ''}">Remove</button></span>` : ''}
           </div>`);
       } else {
         slots.push(`
@@ -3969,7 +3969,7 @@ export class UI {
       }
     }
     for (const button of box.querySelectorAll('.room-retry')) button.onclick = () => this.cb.onRoomReconnect && this.cb.onRoomReconnect(button.dataset.user);
-    for (const button of box.querySelectorAll('.room-remove')) button.onclick = () => this.cb.onRoomRemovePlayer && this.cb.onRoomRemovePlayer(button.dataset.user);
+    for (const button of box.querySelectorAll('.room-remove')) button.onclick = () => this.cb.onRoomRemovePlayer && this.cb.onRoomRemovePlayer(button.dataset.seat || button.dataset.user);
   }
 
   addPing(x, z) { this.pings.push({ x, z, t: 4 }); }

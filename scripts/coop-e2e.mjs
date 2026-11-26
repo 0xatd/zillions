@@ -261,15 +261,47 @@ try {
   }
   if ((await guestSeat())?.name !== stableName) throw new Error('guest seat name changed at the end of the hold');
 
+  const extra = await context('guest-b');
+  await extra.page.goto(guestTarget, { waitUntil: 'domcontentloaded' });
+  await host.page.waitForFunction(() => (globalThis.__zillionsProbe?.()?.roster || []).filter((seat) => !seat.host).length === 2, null, { timeout: 20000 });
+  await extra.page.close();
+  await host.page.waitForFunction(() => (globalThis.__zillionsProbe?.()?.roster || []).filter((seat) => !seat.host).length === 1, null, { timeout: 8000 }).catch(async (error) => {
+    throw new Error(`closed guest was not dropped ${error.message} ${JSON.stringify((await probe(host.page))?.roster)}`);
+  });
+
   await host.page.waitForFunction(() => {
     const button = document.querySelector('#s-start');
     return button && !button.disabled && /START/i.test(button.textContent || '');
   }, null, { timeout: 45000 }).catch(async (error) => {
     throw new Error(`${error.message} host=${JSON.stringify(await dump(host.page, host.notes))} guest=${JSON.stringify(await dump(guest.page, guest.notes))}`);
   });
+  const startedAt = Date.now();
   await host.page.locator('#s-start').click();
   await host.page.locator('#screen-setup').waitFor({ state: 'hidden', timeout: 90000 });
   await guest.page.locator('#screen-setup').waitFor({ state: 'hidden', timeout: 90000 });
+  const moveDeadline = startedAt + 10000;
+  let moved = null;
+  while (Date.now() < moveDeadline) {
+    const guestProbe = await probe(guest.page);
+    if (guestProbe?.myPlayer > 0 && guestProbe.heroes?.length === 2) {
+      const me = guestProbe.heroes[guestProbe.myPlayer];
+      const hostHero = guestProbe.heroes[0];
+      const origin = { x: me.x, z: me.z, hx: hostHero.x, hz: hostHero.z };
+      await guest.page.evaluate((spot) => globalThis.__zillionsOrder?.(spot.x, spot.z), { x: origin.x + 8, z: origin.z + 6 });
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      const after = await probe(guest.page);
+      const mine = after?.heroes?.[after.myPlayer];
+      const hostNow = after?.heroes?.[0];
+      const mineStep = mine ? Math.hypot(mine.x - origin.x, mine.z - origin.z) : 0;
+      const hostStep = hostNow ? Math.hypot(hostNow.x - origin.hx, hostNow.z - origin.hz) : 99;
+      if (after?.myPlayer > 0 && mineStep > 0.4 && hostStep < 0.4) {
+        moved = after;
+        break;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  if (!moved) throw new Error(`guest did not move its own hero within 10s ${JSON.stringify(await probe(guest.page))}`);
   let synced = null;
   const deadline = Date.now() + 90000;
   let last = null;
@@ -295,7 +327,7 @@ try {
     const cdp = await guest.page.context().newCDPSession(guest.page);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
     const paceStart = await probe(guest.page);
-    const untilPace = Date.now() + 120000;
+    const untilPace = Date.now() + 60000;
     let worstStall = 0;
     let worstResync = 0;
     let stuckSince = 0;
@@ -353,7 +385,7 @@ try {
   await guest.page.reload({ waitUntil: 'domcontentloaded' });
   let rejoined = null;
   let lastRejoin = null;
-  const rejoinDeadline = Date.now() + 120000;
+  const rejoinDeadline = Date.now() + 20000;
   while (Date.now() < rejoinDeadline) {
     const hostProbe = await probe(host.page);
     const guestProbe = await probe(guest.page);
