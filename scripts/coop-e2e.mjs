@@ -326,9 +326,12 @@ try {
     // that is still waiting a second later has actually stuck.
     const cdp = await guest.page.context().newCDPSession(guest.page);
     const hostPace = await host.page.context().newCDPSession(host.page);
-    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+    // This machine needs rate 4 to land near 10 FPS. A GitHub runner is already
+    // that slow, and rate 4 there drops the sim to a handful of frames a second.
+    const cpuRate = process.env.GITHUB_ACTIONS ? 2 : 4;
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpuRate });
     // Both tabs render slowly. The sim pump has to keep the world moving anyway.
-    await hostPace.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+    await hostPace.send('Emulation.setCPUThrottlingRate', { rate: cpuRate });
     const paceStart = await probe(guest.page);
     const untilPace = Date.now() + 20000;
     let worstStall = 0;
@@ -429,8 +432,10 @@ try {
   const hostCdp = liveRealtime ? null : await host.page.context().newCDPSession(host.page);
   const guestCdp = liveRealtime ? null : await guest.page.context().newCDPSession(guest.page);
   if (hostCdp && guestCdp) {
-    await hostCdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
-    await guestCdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+    const cpuRate = process.env.GITHUB_ACTIONS ? 2 : 4;
+    await hostCdp.send('Emulation.setCPUThrottlingRate', { rate: cpuRate });
+    await guestCdp.send('Emulation.setCPUThrottlingRate', { rate: cpuRate });
+    await guest.page.bringToFront();
   }
   const afterRejoin = await probe(guest.page);
   if (!(afterRejoin?.myPlayer > 0) || !/guest/i.test(afterRejoin.hud || '')) {
