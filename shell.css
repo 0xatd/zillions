@@ -536,3 +536,4 @@ button:disabled {cursor:not-allowed;}
  #screen-setup.custom-room .setup-options {height:auto;overflow:visible;margin-top:16px;}
  #screen-setup.custom-room #s-start {position:sticky;bottom:0;}
 }
+#screen-setup.custom-room #mp-panel .diffbtn {flex:0 0 auto;min-height:36px;}
