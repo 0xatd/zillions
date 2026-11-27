@@ -7,6 +7,7 @@ import { ShaderPass } from '../vendor/jsm/postprocessing/ShaderPass.js';
 import { Pass, FullScreenQuad } from '../vendor/jsm/postprocessing/Pass.js';
 import { SMAAPass } from '../vendor/jsm/postprocessing/SMAAPass.js';
 import { OutputPass } from '../vendor/jsm/postprocessing/OutputPass.js';
+import { DepthTexture, UnsignedIntType } from 'three';
 import {
   GRAPHICS_PRESETS, QUALITY_KEY, nextQualityChoice, normalizeQualityChoice,
   gpuProbeReady, probeGpuSignals, resolveGraphics, stepDownTier,
@@ -127,6 +128,93 @@ const OutlineEdgeShader = {
     }`,
 };
 
+// Screen-space occlusion from the beauty depth, so High does not render the
+// scene a second time for contact shadows. Eight samples, a floor so the
+// painterly read does not collapse to mud.
+const SsaoShader = {
+  name: 'SsaoShader',
+  uniforms: {
+    tDiffuse: { value: null },
+    tDepth: { value: null },
+    uInverseProjection: { value: new THREE.Matrix4() },
+    uResolution: { value: new THREE.Vector2(1, 1) },
+    uRadiusPx: { value: 16 },
+    uBias: { value: 0.03 },
+    uIntensity: { value: 0.72 },
+  },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }`,
+  fragmentShader: /* glsl */`
+    #include <packing>
+    uniform sampler2D tDiffuse;
+    uniform sampler2D tDepth;
+    uniform mat4 uInverseProjection;
+    uniform vec2 uResolution;
+    uniform float uRadiusPx;
+    uniform float uBias;
+    uniform float uIntensity;
+    varying vec2 vUv;
+    vec3 viewPos(vec2 uv, float depth) {
+      vec4 clip = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+      vec4 view = uInverseProjection * clip;
+      return view.xyz / max(view.w, 0.0001);
+    }
+    void main() {
+      vec4 base = texture2D(tDiffuse, vUv);
+      float depth = texture2D(tDepth, vUv).x;
+      if (depth <= 0.0 || depth >= 0.9995) {
+        gl_FragColor = base;
+        return;
+      }
+      vec3 pos = viewPos(vUv, depth);
+      vec3 n = normalize(cross(dFdx(pos), dFdy(pos)));
+      if (dot(n, pos) > 0.0) n = -n;
+      float px = uRadiusPx * (28.0 / clamp(-pos.z, 8.0, 90.0));
+      vec2 texel = 1.0 / uResolution;
+      float occ = 0.0;
+      const int COUNT = 8;
+      float seed = fract(sin(dot(vUv, vec2(12.9898, 78.233))) * 43758.5453);
+      for (int i = 0; i < COUNT; i++) {
+        float fi = float(i);
+        float ang = fi * 2.39996323 + seed * 6.2831853;
+        float rad = px * (fi + 0.5) / float(COUNT);
+        vec2 uv = vUv + vec2(cos(ang), sin(ang)) * rad * texel;
+        float sampleDepth = texture2D(tDepth, uv).x;
+        vec3 samplePos = viewPos(uv, sampleDepth);
+        vec3 diff = samplePos - pos;
+        float dist2 = dot(diff, diff) + 0.02;
+        occ += max(0.0, dot(n, diff) - uBias) / dist2;
+      }
+      float ao = clamp(1.0 - occ * uIntensity / float(COUNT), 0.58, 1.0);
+      gl_FragColor = vec4(base.rgb * ao, base.a);
+    }`,
+};
+
+class SsaoPass extends ShaderPass {
+  constructor(camera) {
+    super(SsaoShader);
+    this.camera = camera;
+  }
+
+  setSize(width, height) {
+    this.uniforms.uResolution.value.set(Math.max(1, width), Math.max(1, height));
+  }
+
+  render(renderer, writeBuffer, readBuffer, deltaTime, maskActive) {
+    const depth = readBuffer.depthTexture;
+    if (!depth) {
+      this.uniforms.tDiffuse.value = readBuffer.texture;
+    }
+    this.uniforms.tDepth.value = depth;
+    this.uniforms.uInverseProjection.value.copy(this.camera.projectionMatrixInverse);
+    super.render(renderer, writeBuffer, readBuffer, deltaTime, maskActive);
+  }
+}
+
 class ToyOutlinePass extends Pass {
   constructor(scene, camera) {
     super();
@@ -238,7 +326,11 @@ export class TacticalVisuals {
     this._sun = null;
 
     this.composer = new EffectComposer(renderer);
+    this._attachComposerDepth();
     this.composer.addPass(new RenderPass(scene, camera));
+
+    this.ao = new SsaoPass(camera);
+    this.composer.addPass(this.ao);
 
     this.ink = new ToyOutlinePass(scene, camera);
     this.composer.addPass(this.ink);
@@ -254,7 +346,7 @@ export class TacticalVisuals {
 
     // A high threshold keeps bloom on authored emissive signals instead of
     // washing the terrain in a generic glow.
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.3, 0.22, 0.95);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.38, 0.32, 0.86);
     this.composer.addPass(this.bloom);
 
     this.grade = new ShaderPass(GradeShader);
@@ -296,6 +388,7 @@ export class TacticalVisuals {
     this._appliedRatio = 0;
     this._applyPixelRatio();
     this._applyShadowTier();
+    this._applyPostLook();
     if (persist) {
       try { localStorage.setItem(QUALITY_KEY, this.choice); } catch { /* storage can be blocked */ }
     }
@@ -313,6 +406,39 @@ export class TacticalVisuals {
     this.renderer.setPixelRatio(ratio);
     this.composer.setPixelRatio(ratio);
     return true;
+  }
+
+  _attachComposerDepth() {
+    for (const rt of [this.composer.renderTarget1, this.composer.renderTarget2]) {
+      if (rt.depthTexture) continue;
+      const depth = new DepthTexture(Math.max(1, rt.width), Math.max(1, rt.height));
+      depth.type = UnsignedIntType;
+      rt.depthTexture = depth;
+    }
+  }
+
+  _applyPostLook() {
+    const full = this.preset?.post === 'full';
+    const premium = full && this.preset?.toneMapping === 'agx';
+    if (this.ao) this.ao.enabled = full && !!this.preset?.ao;
+    if (this.bloom) {
+      this.bloom.enabled = full;
+      this.bloom.strength = premium ? 0.4 : 0.3;
+      this.bloom.radius = premium ? 0.34 : 0.22;
+      this.bloom.threshold = premium ? 0.84 : 0.95;
+    }
+    if (this.grade) {
+      this.grade.enabled = full;
+      this.grade.uniforms.uSat.value = premium ? 1.06 : 1;
+      this.grade.uniforms.uLift.value = premium ? 0.02 : 0;
+      this.grade.uniforms.uVignette.value = premium ? 0.32 : 0.12;
+      this.grade.uniforms.uShadowAmt.value = premium ? 0.14 : 0.42;
+    }
+    if (this.ink) {
+      this.ink.enabled = full;
+      this.ink.uniforms.uStrength.value = premium ? 0.22 : 0.46;
+    }
+    if (this.smaa) this.smaa.enabled = full;
   }
 
   _applyShadowTier() {

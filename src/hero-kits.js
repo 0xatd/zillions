@@ -20,7 +20,7 @@ LINA_KIT.ability=LINA_KIT.abilities[0];
 export const SNIPER_KIT = {
   kitStatus:'core',key:'sniper',name:'Sniper',icon:'🎯',color:0x637c46,trim:0xcdbb87,
   tagline:'Control approaches with Shrapnel, then pick enemies off at range.',
-  hp:320,dmg:32,range:11,rof:1.2,speed:4.2,noise:16,
+  hp:320,dmg:32,range:11,rof:1.2,speed:4.2,noise:16,two_handed:true,
   levelHp:30,levelDmg:4,regen:2,mana:500,manaRegen:4,
   aura:null,passives:[],
   headshot:{chance:.4,damage:[20,50,110],stun:[.2,.3,.5]},keenScope:.015,

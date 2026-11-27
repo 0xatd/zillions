@@ -58,7 +58,8 @@ import { inboxForMatchStart, matchStartReady } from './multiplayer-windows.js';
 import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligibility.js';
 import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow, stallRecovery } from './multiplayer-pacing.js';
 import { FrameGuard, recoverableRestore } from './runtime-guard.js';
-import { buildingArtState, unitArtState, unitPose } from './art-state.js';
+import { buildingArtState, twoHandedArmCues, twoHandedArmPitch, unitArtState, unitPose } from './art-state.js';
+import { applyColorPipeline, createRoomEnvironment, disposePresentationMaterial, dressObject, shadowSpanFor } from './presentation.js';
 import { HordeArt, buildShardGeometry } from './horde-art.js';
 import { buildUnitModel } from './unit-art.js';
 import { buildBuildingMesh } from './building-art.js';
@@ -105,6 +106,7 @@ const _tmpColA = new THREE.Color();
 const _tmpColB = new THREE.Color();
 const _tmpColC = new THREE.Color();
 const _tmpColD = new THREE.Color();
+const _tmpColE = new THREE.Color();
 
 
 // Inverted-hull ink outline for a toy-kit figure: each mesh gets a back-face
@@ -194,7 +196,10 @@ class App {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(30, 1, 0.5, 600);
     this.tacticalVisuals = new TacticalVisuals(this.renderer, this.scene, this.camera, boot);
-    this.tacticalVisuals.onChange = () => this._applyShadowBudget();
+    this.tacticalVisuals.onChange = () => {
+      this._applyShadowBudget();
+      this._applyPresentation();
+    };
     this.tacticalVisuals.onResize = () => this.resize();
     if (perfHudWanted()) this.perfHud = mountPerfHud();
     this._frustum = new THREE.Frustum();
@@ -6201,10 +6206,9 @@ class App {
   }
 
   _setupLights() {
-    // Toy lighting: one sun for crisp shape shadows, and a fill whose ground
-    // colour is the map's shadow colour — so every shadowed face on a map
-    // shares one tint, like a painted diorama. Totals are tuned so a lit top
-    // face shows its picked colour with tone mapping off.
+    // One key light, a cool hemisphere, and a little ambient. Low leaves tone
+    // mapping off so picked colours stay put. Medium and High add AgX, a
+    // PMREM room, and soft shadows. The shadow camera tightens on High.
     this.sun = new THREE.DirectionalLight(0xffffff, 2.3);
     this.sun.position.set(85, 52, 24);
     this.sun.castShadow = true;
@@ -6221,6 +6225,29 @@ class App {
     this.scene.fog = new THREE.Fog(0xa8cfc4, 90, 240);
     this.scene.background = new THREE.Color(0xa8cfc4);
     this.tacticalVisuals.attachSun(this.sun);
+    this._applyPresentation();
+  }
+
+  // Quality, tone mapping, IBL and the Lambert/PBR switch. Presentation only.
+  _applyPresentation() {
+    const preset = this.tacticalVisuals?.preset;
+    if (!preset || !this.renderer) return;
+    applyColorPipeline(this.renderer, preset);
+    if (preset.ibl) {
+      if (!this._envMap) {
+        try { this._envMap = createRoomEnvironment(this.renderer); } catch { this._envMap = null; }
+      }
+      this.scene.environment = this._envMap || null;
+    } else {
+      this.scene.environment = null;
+    }
+    if (this.sun) {
+      const soft = preset.shadowType === 'pcfsoft' && preset.shadows;
+      this.sun.shadow.bias = soft ? -0.00018 : -0.0006;
+      this.sun.shadow.normalBias = soft ? 0.05 : 0.02;
+      this.sun.shadow.radius = soft ? 2.5 : 1;
+    }
+    dressObject(this.scene, preset.materials !== 'lambert');
   }
 
   // ---------------- particles ----------------
@@ -7374,6 +7401,7 @@ class App {
       }
     });
     for (const original of painted.keys()) original.dispose();
+    dressObject(mesh, this.tacticalVisuals?.preset?.materials !== 'lambert');
     return mesh;
   }
 
@@ -7440,10 +7468,7 @@ class App {
       if (o.geometry && !o.geometry.userData.kitShared && !o.userData.sharedGeometry) o.geometry.dispose();
       if (o.userData.ink) return; // shared ink-outline material
       const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
-      for (const mat of mats) {
-        if (mat.map) mat.map.dispose();
-        mat.dispose();
-      }
+      for (const mat of mats) disposePresentationMaterial(mat);
     });
   }
 
@@ -7642,6 +7667,7 @@ class App {
     g.add(affected);
     g.userData.affected = affected;
     if (weaponParts.length) g.userData.weaponParts = weaponParts;
+    dressObject(g, this.tacticalVisuals?.preset?.materials !== 'lambert');
     return g;
   }
 
@@ -7765,12 +7791,20 @@ class App {
         body.rotation.z = pose.roll;
       }
       const limbs = rec.mesh.userData.limbs;
+      const twoHanded = !!(u.hero && u.def?.two_handed);
       if (limbs) {
         const stride = pose.stride;
         if (limbs.legL) limbs.legL.rotation.x = stride;
         if (limbs.legR) limbs.legR.rotation.x = -stride;
-        if (limbs.armL) limbs.armL.rotation.x = -stride * 0.55 - attackPulse * 0.45 - (artState === 'cast' ? cuePulse * 1.05 : 0);
-        if (limbs.armR) limbs.armR.rotation.x = stride * 0.55 - attackPulse * 0.65 - (artState === 'cast' ? cuePulse * 1.05 : 0);
+        if (twoHanded) {
+          const cues = twoHandedArmCues(u, artState, cuePulse);
+          const pitch = twoHandedArmPitch(stride, cues.recoil, cues.windup, cues.cast);
+          if (limbs.armL) limbs.armL.rotation.x = pitch;
+          if (limbs.armR) limbs.armR.rotation.x = pitch;
+        } else {
+          if (limbs.armL) limbs.armL.rotation.x = -stride * 0.55 - attackPulse * 0.45 - (artState === 'cast' ? cuePulse * 1.05 : 0);
+          if (limbs.armR) limbs.armR.rotation.x = stride * 0.55 - attackPulse * 0.65 - (artState === 'cast' ? cuePulse * 1.05 : 0);
+        }
       }
       const marineNode = rec.mesh.userData.marineNode;
       if (marineNode) {
@@ -7783,7 +7817,7 @@ class App {
         }
         setMarineLod(marineNode, low);
       }
-      if (weaponParts.length && attackPulse > 0) {
+      if (weaponParts.length && attackPulse > 0 && !twoHanded) {
         for (const part of weaponParts) {
           const rp = part.userData.restPos;
           const rr = part.userData.restRot;
@@ -8791,7 +8825,7 @@ class App {
     // are lit, and shadows fall up-screen to the right like a lit tabletop.
     this.sun.position.set(this.focus.x - 34, this.focus.y + 78, this.focus.z + 26);
     this.sun.target.position.set(this.focus.x, this.focus.y, this.focus.z);
-    const shadowSpan = clamp(this.camDist * 0.85, 26, 74);
+    const shadowSpan = shadowSpanFor(this.tacticalVisuals?.preset, this.camDist);
     if (Math.abs(shadowSpan - (this._shadowSpan || 0)) > 1) {
       this._shadowSpan = shadowSpan;
       Object.assign(this.sun.shadow.camera, { left: -shadowSpan, right: shadowSpan, top: shadowSpan, bottom: -shadowSpan });
@@ -8819,16 +8853,20 @@ class App {
     const top = _tmpColC.setHex(paletteSkyTop(pal));
     // Threat drains the warmth out of the light toward the shadow colour —
     // a late siege LOOKS late without any day/night clock.
-    this.sun.intensity = lerp(1.25, 2.3, b);
-    this.sun.color.setRGB(1, 0.94, 0.83).lerp(shadow, (1 - b) * 0.35);
-    this.hemi.intensity = lerp(0.55, 0.75, b);
-    this.hemi.color.setRGB(0.83, 0.91, 1).lerp(shadow, (1 - b) * 0.4);
+    const pbr = this.tacticalVisuals?.preset?.materials === 'pbr';
+    this.sun.intensity = lerp(1.2, pbr ? 2.65 : 2.3, b);
+    this.sun.color.setRGB(1, 0.93, 0.8).lerp(shadow, (1 - b) * 0.35);
+    this.hemi.intensity = lerp(0.48, pbr ? 0.58 : 0.75, b);
+    this.hemi.color.setRGB(0.78, 0.88, 1).lerp(shadow, (1 - b) * 0.4);
     this.hemi.groundColor.copy(shadow);
-    this.amb.intensity = 0.35;
+    this.amb.intensity = pbr ? 0.18 : 0.35;
     this.amb.color.copy(shadow).lerp(_tmpColD.setRGB(1, 1, 1), 0.45);
     horizon.lerp(shadow, (1 - b) * 0.6);
     top.lerp(shadow, (1 - b) * 0.7);
-    this.scene.background = this.sky.set(top, horizon) || horizon.clone();
+    const mid = _tmpColE.copy(top).lerp(horizon, 0.45);
+    mid.r = Math.min(1, mid.r * 1.06);
+    mid.g = Math.min(1, mid.g * 1.02);
+    this.scene.background = this.sky.set(top, horizon, mid) || horizon.clone();
     this.scene.fog.color.copy(horizon);
     const b2 = b;
     // Windows glow when it's dark.

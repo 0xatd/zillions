@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from '../vendor/GLTFLoader.js';
 import { culture, CULTURES, DEFAULT_CULTURE, SHARED_KIT, activeCulture } from './cultures.js';
 import { marineFlag } from './marine-recipe.js';
+import { configurePbrMaterial, isPbrMaterial } from './presentation.js';
 
 const TEMPLATES = {};
 
@@ -159,18 +160,22 @@ export function loadAssets() {
       const root = gltf.scene;
       const authored = ART_SLICE_KEYS.includes(key);
       root.traverse((o) => {
-        if (o.isMesh) {
-          o.castShadow = true;
-          o.receiveShadow = true;
-          // Keep the authored slice's metal, roughness, and emissive response.
-          // Legacy KayKit props use Lambert because they are ambient set
-          // dressing and can use the cheaper material path.
-          if (!authored) {
-            const src = o.material;
-            o.material = new THREE.MeshLambertMaterial({ flatShading: true, map: src.map || null,
-              color: src.map ? new THREE.Color(0.82, 0.78, 0.72) : (src.color || new THREE.Color(0x8a8478)),
-            });
-          }
+        if (!o.isMesh) return;
+        o.castShadow = true;
+        o.receiveShadow = true;
+        // Keep roughness, metalness, clearcoat, normal, ORM and emissive.
+        // Low swaps these for a Lambert stand-in later; the template stays PBR.
+        if (isPbrMaterial(o.material)) configurePbrMaterial(o.material);
+        else if (!authored && o.material && !o.material.isMeshBasicMaterial) {
+          const src = o.material;
+          o.material = new THREE.MeshLambertMaterial({
+            flatShading: true,
+            map: src.map || null,
+            color: src.color ? src.color.clone() : new THREE.Color(0x8a8478),
+            emissive: src.emissive ? src.emissive.clone() : new THREE.Color(0x000000),
+            emissiveMap: src.emissiveMap || null,
+            emissiveIntensity: src.emissiveIntensity || 0,
+          });
         }
       });
       // Normalize: sit on y=0, remember footprint for scaling at clone time.

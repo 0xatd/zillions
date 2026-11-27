@@ -541,7 +541,7 @@ export const HEROES = {
     key: 'scott', name: 'Scott English', icon: '💥', color: 0xb32020, trim: 0xf4f1e8,
     tagline: 'Short range. Every trigger-pull is a verdict.',
     hp: 480, dmg: 62, range: 4.5, rof: 0.55, speed: 4.3, noise: 8,
-    levelHp: 46, levelDmg: 8, regen: 3.0, shotgun: true, splash: 1.7,
+    levelHp: 46, levelDmg: 8, regen: 3.0, shotgun: true, splash: 1.7, two_handed: true,
     aura: {
       key: 'gravity', name: 'Heavy Gravity', icon: '🪐', radius: 5.5, slow: 0.65, color: 0x7a9cf0,
       desc: 'Space itself thickens around Scott — the dead crawl 35% slower in his field.',
@@ -562,7 +562,7 @@ export const HEROES = {
     hp: 340, dmg: 36, range: 11.5, rof: 1.3, speed: 4.5, noise: 16,
     levelHp: 32, levelDmg: 4.6, regen: 2.0,
     mana: 380, manaRegen: 4, resource: 'Focus',
-    distanceDamage: 0.018,
+    distanceDamage: 0.018, two_handed: true,
     aura: {
       key: 'nanites', name: 'Nanite Swarm', icon: '🧬', radius: 5.5, regen: 6, color: 0x59c8b8,
       desc: 'A cloud of repair nanites knits the wounds of nearby troops and heroes (+6 hp/s).',
@@ -601,7 +601,7 @@ export const HEROES = {
     key: 'danny', name: 'Daniel Donovan', icon: '🗡️', color: 0x2468c9, trim: 0x111318,
     tagline: 'Long range. Now you see him. They never do.',
     hp: 290, dmg: 34, range: 13, rof: 1.1, speed: 4.6, noise: 12,
-    levelHp: 27, levelDmg: 5, regen: 2.0,
+    levelHp: 27, levelDmg: 5, regen: 2.0, two_handed: true,
     aura: {
       key: 'siphon', name: 'Nutrient Siphon', icon: '💀', radius: 5.5, drain: 5, leech: 0.5, color: 0x7fd85e,
       desc: 'A necrotic field wicks the juices out of the dead near Daniel (5 hp/s) and feeds them back to him.',
