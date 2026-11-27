@@ -214,8 +214,9 @@ asset CDNs); authored assets must be committed to the repo.
 ### Verify against REAL renders, never flat previews
 
 The single biggest trap: judging art from a headless rasterizer or Blender
-viewport. The live renderer has ACES tone mapping, hemisphere + directional
-light, 2048 px shadows, bloom, and fog — flat previews systematically
+viewport. The live renderer on High has AgX tone mapping, image-based lighting,
+hemisphere + directional light, soft 2048 px shadows, bloom, ambient
+occlusion, and fog. Low keeps the Lambert path. Flat previews systematically
 undersell it and will steer you toward over-darkening and over-detailing.
 Use `tools/preview-shot.mjs`:
 

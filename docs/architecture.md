@@ -87,7 +87,8 @@ to snapshots when the state can affect later simulation.
 | `src/map.js` | Three.js terrain geometry, relief, colors, rocks, and set dressing |
 | `src/landscape-art.js` | Seeded instanced forest kit, edge outcrops, shrubs, fallen timber and shore reeds |
 | `src/environment-art.js` | Painted world-space materials, terrain control maps and animated shallow/deep water |
-| `src/tactical-visuals.js` | Tactical presentation helpers and graphics presets |
+| `src/tactical-visuals.js` | Tactical presentation helpers, post stack, and graphics presets |
+| `src/presentation.js` | PBR material tier, color pipeline, and room image-based lighting |
 | `src/graphics-quality.js` | Low, medium, high, and auto graphics presets. Render-only |
 | `src/instance-cull.js` | Per-instance frustum cull for static instanced props |
 | `src/unit-impostors.js` | Distant-unit stand-ins |

@@ -56,6 +56,18 @@ test('auto resolves from the probe and an explicit choice stays put', () => {
 test('presets only reduce cost as the tier drops, and high keeps the full look', () => {
   assert.equal(GRAPHICS_PRESETS.low.shadows, false);
   assert.equal(GRAPHICS_PRESETS.low.antialias, false);
+  assert.equal(GRAPHICS_PRESETS.low.post, 'off');
+  assert.equal(GRAPHICS_PRESETS.low.materials, 'lambert');
+  assert.equal(GRAPHICS_PRESETS.low.ao, false);
+  assert.equal(GRAPHICS_PRESETS.low.ibl, false);
+  assert.equal(GRAPHICS_PRESETS.medium.materials, 'pbr');
+  assert.equal(GRAPHICS_PRESETS.medium.post, 'off');
+  assert.equal(GRAPHICS_PRESETS.medium.ao, false);
+  assert.equal(GRAPHICS_PRESETS.high.materials, 'pbr');
+  assert.equal(GRAPHICS_PRESETS.high.ao, true);
+  assert.equal(GRAPHICS_PRESETS.high.ibl, true);
+  assert.equal(GRAPHICS_PRESETS.high.toneMapping, 'agx');
+  assert.equal(GRAPHICS_PRESETS.high.shadowType, 'pcfsoft');
   assert.ok(GRAPHICS_PRESETS.low.particles < GRAPHICS_PRESETS.medium.particles);
   assert.ok(GRAPHICS_PRESETS.medium.particles < GRAPHICS_PRESETS.high.particles);
   assert.ok(GRAPHICS_PRESETS.low.projectiles < GRAPHICS_PRESETS.high.projectiles);

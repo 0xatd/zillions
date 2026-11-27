@@ -152,7 +152,10 @@ function buildTree(kit, recipe) {
 
 // Animated groups: the runtime rotates/offsets these nodes; everything under
 // one of them (down to the next group) is rigid relative to it.
-const GROUPS = new Set(['body', 'leg_l', 'leg_r', 'arm_l', 'arm_r', 'weapon']);
+// Moving parts stay their own meshes. Merging stops at these nodes so a
+// stride can still swing a limb without dragging the torso or the gun.
+export const MARINE_ANIMATED_GROUPS = Object.freeze(['body', 'leg_l', 'leg_r', 'arm_l', 'arm_r', 'weapon']);
+const GROUPS = new Set(MARINE_ANIMATED_GROUPS);
 const MERGE_CACHE = new Map();
 const _inv = new THREE.Matrix4();
 const _rel = new THREE.Matrix4();

@@ -10,6 +10,22 @@ export function unitArtState(unit, cues = {}) {
   return unit.moving ? 'run' : 'idle';
 }
 
+// Two-handed firearms keep both hands on the weapon. The off-hand copies the
+// weapon hand instead of swinging the opposite way, which walked it off the
+// foregrip. Recoil is the recovery kick, windup is the shot's prep, cast is
+// the ability pose. All four are presentation 0..1 signals.
+export function twoHandedArmPitch(stride = 0, recoil = 0, windup = 0, cast = 0) {
+  return stride * 0.12 + recoil * 0.30 - windup * 0.06 - cast * 0.35;
+}
+
+export function twoHandedArmCues(unit, artState, cuePulse = 0) {
+  const duration = unit?.attack?.duration || 1;
+  const windup = unit?.attack ? clamp(1 - unit.attack.t / duration, 0, 1) : 0;
+  const recoil = unit?.attack ? 0 : clamp((unit?.attackRecovery || 0) / 0.24, 0, 1);
+  const cast = artState === 'cast' ? clamp(cuePulse || 0, 0, 1) : 0;
+  return { windup, recoil, cast };
+}
+
 export function unitPose(state, phase, cues = {}) {
   const cycle = Math.sin(phase);
   const pulse = clamp(cues.pulse || 0, 0, 1);

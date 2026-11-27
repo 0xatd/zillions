@@ -34,6 +34,7 @@ Default branch: main
 - src/terrain.js creates deterministic terrain and terrain-derived sites.
 - src/map.js renders terrain relief and set dressing.
 - src/graphics-quality.js owns the Low, Medium, High, and Auto graphics presets. They are render-only and stay out of the simulation.
+- src/presentation.js keeps GLB PBR materials on Medium and High, swaps them for Lambert on Low, and builds the room image-based light. It does not touch simulation state.
 - src/landscape-art.js owns the instanced forest and shoreline scenery kit.
 - src/environment-art.js owns terrain materials and animated water.
 - src/config.js also generates endless procedural campaign maps (levelById(n) for n > 5) from the level number alone.

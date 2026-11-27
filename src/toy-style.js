@@ -1,10 +1,10 @@
 // Toy style: the shared look of the Thronefall-style art pass.
 //
-// One rule drives everything here: a picked hex colour should land on screen
-// as that colour. So every surface is a matte, flat-shaded Lambert material
-// (no metal, no roughness, no texture), tone mapping is off, and depth comes
-// from crisp shadows tinted with each map's own shadow colour plus a thin
-// outline pass (see ToyOutlinePass in tactical-visuals.js).
+// Procedural scenery stays matte Lambert so a picked hex still reads as that
+// hex under the Low preset (no tone mapping). Medium and High tone-map with
+// AgX and keep authored GLB materials; see src/presentation.js. Depth on
+// those tiers comes from a soft shadow, hemisphere fill and, on High, the
+// outline plus ambient occlusion in tactical-visuals.js.
 //
 // Presentation only. Nothing here reads or writes simulation state.
 import * as THREE from 'three';
@@ -41,15 +41,19 @@ export class SkyGradient {
     this.texture.colorSpace = THREE.SRGBColorSpace;
   }
 
-  set(top, horizon) {
+  // mid is optional. Two stops stay valid for callers that only have a
+  // zenith and a horizon; a third stop puts a shoulder of light between them.
+  set(top, horizon, mid = null) {
     if (!this.texture) return null;
     const a = '#' + top.getHexString(), b = '#' + horizon.getHexString();
-    const key = a + b;
+    const c = mid ? '#' + mid.getHexString() : '';
+    const key = a + '|' + c + '|' + b;
     if (key !== this.key) {
       this.key = key;
       const ctx = this.canvas.getContext('2d');
       const grad = ctx.createLinearGradient(0, 0, 0, 256);
       grad.addColorStop(0, a);
+      if (c) grad.addColorStop(0.62, c);
       grad.addColorStop(1, b);
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, 2, 256);
