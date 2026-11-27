@@ -5,6 +5,10 @@ import * as THREE from 'three';
 import { GLTFLoader } from '../vendor/GLTFLoader.js';
 import { culture, CULTURES, DEFAULT_CULTURE, SHARED_KIT, activeCulture } from './cultures.js';
 import { marineFlag } from './marine-recipe.js';
+import {
+  extrasAreTwoHanded, isGlbBytes, marineHeroAssetKey, marineHeroLoadUrls, marineHeroManifest,
+  MARINE_HERO_LOD_NAMES,
+} from './marine-hero-art.js';
 
 const TEMPLATES = {};
 
@@ -36,12 +40,9 @@ const MANIFEST = {
 };
 
 // Marine heroes (default on; ?marineHeroes=0 opts out): the art-marines hero
-// line, built by tools/art/build_hero_marines.py.
-if (marineFlag('marineHeroes')) {
-  for (const k of ['scott', 'alexander', 'danny', 'turtle', 'john', 'tiger', 'aaron']) {
-    MANIFEST[`marineHero_${k}`] = `assets/art-marines/hero_${k}.glb`;
-  }
-}
+// line. The manifest value is the full-detail GLB. Rykus, Tynor and Draco
+// also have a *_lod1.glb that loadAssets fetches only for the Low preset.
+if (marineFlag('marineHeroes')) Object.assign(MANIFEST, marineHeroManifest());
 
 export const ART_SLICE_KEYS = Object.freeze([
   'heroScott', 'humanRifleman', 'hiveDrone',
@@ -150,40 +151,151 @@ export function kitGeometry(name, part) {
   return { geometry: mesh.geometry, pivot };
 }
 
-export function loadAssets() {
+function sceneIsTwoHanded(root) {
+  let found = false;
+  root?.traverse((node) => {
+    if (extrasAreTwoHanded(node.userData)) found = true;
+  });
+  return found;
+}
+
+// Textured marine heroes keep their painted albedo and normal map on Lambert.
+// Untextured kit heroes stay flat-shaded, matching the KayKit prop path.
+function applyMarineHeroMaterial(mesh) {
+  const sources = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  const convert = (src) => {
+    if (!src) return src;
+    const textured = !!(src.map || src.normalMap);
+    const mat = new THREE.MeshLambertMaterial({
+      flatShading: !textured,
+      map: src.map || null,
+      normalMap: src.normalMap || null,
+      color: textured ? new THREE.Color(0xffffff) : (src.color || new THREE.Color(0x8a8478)),
+    });
+    if (src.normalScale?.isVector2) mat.normalScale.copy(src.normalScale);
+    return mat;
+  };
+  const next = Array.isArray(mesh.material) ? sources.map(convert) : convert(sources[0]);
+  mesh.material = next;
+  for (const src of sources) {
+    if (src && src !== next && !(Array.isArray(next) && next.includes(src))) src.dispose();
+  }
+}
+
+function disposeTemplateGeometry(holder) {
+  holder?.traverse((node) => {
+    if (node.geometry) node.geometry.dispose();
+    const mats = Array.isArray(node.material) ? node.material : (node.material ? [node.material] : []);
+    for (const mat of mats) mat.dispose();
+  });
+}
+
+function adoptTemplate(key, root) {
+  const authored = ART_SLICE_KEYS.includes(key);
+  const marineHero = key.startsWith('marineHero_');
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    o.castShadow = true;
+    o.receiveShadow = true;
+    // Keep the authored slice's metal, roughness, and emissive response.
+    // Legacy KayKit props use Lambert because they are ambient set
+    // dressing and can use the cheaper material path.
+    if (marineHero) applyMarineHeroMaterial(o);
+    else if (!authored) {
+      const src = o.material;
+      o.material = new THREE.MeshLambertMaterial({ flatShading: true, map: src.map || null,
+        color: src.map ? new THREE.Color(0.82, 0.78, 0.72) : (src.color || new THREE.Color(0x8a8478)),
+      });
+    }
+  });
+  // Normalize: sit on y=0, remember footprint for scaling at clone time.
+  const box = new THREE.Box3().setFromObject(root);
+  root.position.y -= box.min.y;
+  const holder = new THREE.Group();
+  holder.add(root);
+  holder.userData.size = box.getSize(new THREE.Vector3());
+  if (marineHero) holder.userData.twoHanded = sceneIsTwoHanded(root);
+  return holder;
+}
+
+function storeTemplate(key, scene) {
+  const previous = TEMPLATES[key];
+  if (!scene) {
+    if (previous) disposeTemplateGeometry(previous);
+    delete TEMPLATES[key];
+    return false;
+  }
+  TEMPLATES[key] = adoptTemplate(key, scene);
+  if (previous) disposeTemplateGeometry(previous);
+  return true;
+}
+
+// Hero GLBs are Git LFS. A deployment that serves the pointer text (HTTP 200,
+// ~132 bytes, "version https://git-lfs...") must not reach the parser. The
+// caller then leaves the template empty so the existing hero mesh is used.
+async function readHeroScene(loader, url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${url} HTTP ${response.status}`);
+  const bytes = await response.arrayBuffer();
+  if (!isGlbBytes(bytes)) throw new Error(`${url} is not a GLB`);
+  const gltf = await loader.parseAsync(bytes, '');
+  if (!gltf?.scene) throw new Error(`${url} has no scene`);
+  return gltf.scene;
+}
+
+async function loadMarineHeroScene(loader, name, quality) {
+  const urls = marineHeroLoadUrls(name, quality);
+  for (const url of urls) {
+    try {
+      return await readHeroScene(loader, url);
+    } catch {
+      // Try the next url. The last failure leaves the template unset.
+    }
+  }
+  return null;
+}
+
+function marineHeroFailed(key) {
+  console.warn(`[assets] ${key} failed to parse; the existing hero model will be used`);
+}
+
+// `marineHeroQuality` is the graphics choice: low, medium, high, or auto.
+// Only 'low' selects *_lod1.glb, and only for heroes that have one.
+export function loadAssets(options = {}) {
+  const marineHeroQuality = options.marineHeroQuality ?? 'auto';
   const loader = new GLTFLoader();
   const kit = loadKit(loader);
   return Promise.all([kit, ...Object.entries(MANIFEST).map(async ([key, url]) => {
     try {
+      if (key.startsWith('marineHero_')) {
+        const name = key.slice('marineHero_'.length);
+        const scene = await loadMarineHeroScene(loader, name, marineHeroQuality);
+        if (!storeTemplate(key, scene)) marineHeroFailed(key);
+        return;
+      }
       const gltf = await loader.loadAsync(url);
-      const root = gltf.scene;
-      const authored = ART_SLICE_KEYS.includes(key);
-      root.traverse((o) => {
-        if (o.isMesh) {
-          o.castShadow = true;
-          o.receiveShadow = true;
-          // Keep the authored slice's metal, roughness, and emissive response.
-          // Legacy KayKit props use Lambert because they are ambient set
-          // dressing and can use the cheaper material path.
-          if (!authored) {
-            const src = o.material;
-            o.material = new THREE.MeshLambertMaterial({ flatShading: true, map: src.map || null,
-              color: src.map ? new THREE.Color(0.82, 0.78, 0.72) : (src.color || new THREE.Color(0x8a8478)),
-            });
-          }
-        }
-      });
-      // Normalize: sit on y=0, remember footprint for scaling at clone time.
-      const box = new THREE.Box3().setFromObject(root);
-      root.position.y -= box.min.y;
-      const holder = new THREE.Group();
-      holder.add(root);
-      holder.userData.size = box.getSize(new THREE.Vector3());
-      TEMPLATES[key] = holder;
+      storeTemplate(key, gltf.scene);
     } catch (e) {
       // Asset missing/unloadable — procedural fallback will be used.
     }
   })]);
+}
+
+// Swap the Low-preset hero files when the graphics choice crosses Low.
+// Other marine heroes have no LOD file and stay as they were.
+export function reloadMarineHeroes(quality) {
+  const loader = new GLTFLoader();
+  return Promise.all(MARINE_HERO_LOD_NAMES.map(async (name) => {
+    const key = marineHeroAssetKey(name);
+    if (!Object.prototype.hasOwnProperty.call(MANIFEST, key) && !TEMPLATES[key]) return;
+    try {
+      const scene = await loadMarineHeroScene(loader, name, quality);
+      if (!storeTemplate(key, scene)) marineHeroFailed(key);
+    } catch (e) {
+      storeTemplate(key, null);
+      marineHeroFailed(key);
+    }
+  }));
 }
 
 // Clone an asset scaled so its horizontal footprint fits `fit` world units

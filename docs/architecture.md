@@ -97,6 +97,7 @@ to snapshots when the state can affect later simulation.
 | `src/unit-art.js` | Procedural troop and hero rigs with animatable limbs |
 | `src/building-art.js` | Colony-kit building meshes (authored GLB dispatch + procedural fallback) |
 | `src/assets.js` | Asset loading and asset paths |
+| `src/marine-hero-art.js` | Marine-hero manifest, Low-preset LOD choice, and two-handed arm pose. Presentation only |
 | `src/audio.js` | Music, voice, and sound effect playback |
 
 Terrain walkability belongs to the simulation. Visual relief must not silently
@@ -111,6 +112,14 @@ Additional authored unit and building models live under `assets/art-slice/`. The
 and export contract is in `docs/art-pipeline.md`. `src/assets.js` loads each GLB
 and `src/main.js` binds named moving parts. Missing GLBs fall back to the
 procedural renderer and must not stop a match from starting.
+
+`assets/art-marines/` hero files for Rykus (`marineHero_sniper`), Tynor and Draco
+are registered the same way. The full GLB is the manifest path. The Low graphics
+choice loads `*_lod1.glb` and falls back to the full file if that LOD fails.
+Medium, High, and Auto keep the full file. A file that is not a GLB — including
+a Git LFS pointer served with HTTP 200 — is rejected before parse, the template
+stays empty, and the existing hero mesh is used. `.gitattributes` still tracks
+these GLBs with LFS. That storage choice is unchanged.
 
 ### Application and UI
 
