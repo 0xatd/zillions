@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from './vendor/GLTFLoader.js';
+import { loadGlb } from './src/asset-base.js';
 import { unitPose } from './src/art-state.js';
 
 const ASSETS = [
@@ -53,7 +54,7 @@ let parts = {};
 async function load() {
   status.textContent = 'Loading asset...';
   if (current) scene.remove(current);
-  const gltf = await loader.loadAsync(`assets/art-slice/${select.value}.glb`);
+  const gltf = await loadGlb(loader, `assets/art-slice/${select.value}.glb`);
   current = gltf.scene;
   originalMaterials = [];
   parts = {};

@@ -39,7 +39,7 @@ test('assets.js copies that manifest when marine heroes are enabled', async () =
   const src = await readFile(new URL('../src/assets.js', import.meta.url), 'utf8');
   assert.match(src, /marineFlag\('marineHeroes'\)/);
   assert.match(src, /Object\.assign\(MANIFEST,\s*marineHeroManifest\(\)\)/);
-  assert.match(src, /isGlbBytes/);
+  assert.match(src, /loadGlb/);
   assert.match(src, /marineHeroLoadUrls/);
   assert.match(src, /releaseRetiredHeroTextures/);
   assert.match(src, /materialTextures\(mat\)/);

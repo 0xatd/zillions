@@ -35,9 +35,15 @@ Export rules:
 
 ## Runtime
 
-`src/assets.js` owns asset paths and loading. A missing authored model must fall
-back to the current procedural model. Presentation assets must never stop the
-simulation from starting.
+`src/assets.js` owns asset paths and loading. `src/asset-base.js` turns each
+repo-relative `.glb` path into a request. The default host is the public R2
+bucket documented in the README. A failed response or a non-GLB body falls
+back to the same path on this origin, then to the current procedural model.
+Presentation assets must never stop the simulation from starting.
+
+Upload real GLB bytes with `node scripts/upload-assets-r2.mjs`. The script
+puts objects and does not delete keys. Run `git lfs pull` first so a pointer
+file is not what gets published.
 
 `src/main.js` binds named moving parts and effect sockets. Model state does not
 belong in deterministic snapshots.

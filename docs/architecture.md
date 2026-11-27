@@ -97,6 +97,7 @@ to snapshots when the state can affect later simulation.
 | `src/unit-art.js` | Procedural troop and hero rigs with animatable limbs |
 | `src/building-art.js` | Colony-kit building meshes (authored GLB dispatch + procedural fallback) |
 | `src/assets.js` | Asset loading and asset paths |
+| `src/asset-base.js` | GLB host, remote-then-local fetch, and non-GLB rejection. Presentation only |
 | `src/marine-hero-art.js` | Marine-hero manifest, Low-preset LOD choice, and two-handed arm pose. Presentation only |
 | `src/audio.js` | Music, voice, and sound effect playback |
 
@@ -113,13 +114,29 @@ and export contract is in `docs/art-pipeline.md`. `src/assets.js` loads each GLB
 and `src/main.js` binds named moving parts. Missing GLBs fall back to the
 procedural renderer and must not stop a match from starting.
 
+`src/asset-base.js` is the one GLB host. The default is the public R2 bucket
+`zillions-assets` at `https://pub-cf11595eb9c04887b6187ec78f8dcbd5.r2.dev`.
+Request paths stay the repo-relative paths (`assets/art-marines/hero_sniper.glb`).
+Remote URLs add `?v=` from `GLB_ASSET_VERSION`. Object keys stay stable and
+the one-year cache header stays. Bump the version when replaced bytes must
+reach players who already cached the previous URL.
+Override that host with `?assetBase=`, `window.ZILLIONS_ASSET_BASE`, the
+`zillions-asset-base` meta tag, or `ZILLIONS_ASSET_BASE` under Node. An empty
+`?assetBase=` uses this origin only. A failed response or a body that is not a
+GLB, including a Git LFS pointer served with HTTP 200, is discarded. The same
+path is then loaded from this origin. If that also fails, the procedural model
+or the existing hero mesh is used. The game does not throw. `assets.taborlin.co`
+is the planned custom domain and is not attached yet.
+
 `assets/art-marines/` hero files for Rykus (`marineHero_sniper`), Tynor and Draco
 are registered the same way. The full GLB is the manifest path. The Low graphics
 choice loads `*_lod1.glb` and falls back to the full file if that LOD fails.
-Medium, High, and Auto keep the full file. A file that is not a GLB — including
-a Git LFS pointer served with HTTP 200 — is rejected before parse, the template
-stays empty, and the existing hero mesh is used. `.gitattributes` still tracks
-these GLBs with LFS. That storage choice is unchanged.
+Medium, High, and Auto keep the full file. `.gitattributes` still tracks `*.glb`
+with Git LFS, except the two compact marine-kit files that are ordinary Git
+blobs. Removing the LFS rule for GLBs is a follow-up. Do that only after the
+bucket is populated and a production response for a hero file starts with `glTF`.
+Until then a remote outage still needs the same-origin file, and those two kit
+files must not turn back into pointer text.
 
 ### Application and UI
 

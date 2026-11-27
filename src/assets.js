@@ -1,12 +1,14 @@
 // CC0 3D assets (KayKit Dungeon Remastered, kaylousberg.com) loaded at startup.
-// Everything degrades gracefully: if a GLB fails to load, callers fall back to
-// the procedural meshes, so the game always runs.
+// Every GLB is requested from the asset host in src/asset-base.js, then from
+// the same relative path on this origin. A failure leaves the template empty
+// so callers keep the procedural mesh or the existing hero model.
 import * as THREE from 'three';
 import { GLTFLoader } from '../vendor/GLTFLoader.js';
+import { loadGlb } from './asset-base.js';
 import { culture, CULTURES, DEFAULT_CULTURE, SHARED_KIT, activeCulture } from './cultures.js';
 import { marineFlag } from './marine-recipe.js';
 import {
-  extrasAreTwoHanded, isGlbBytes, marineHeroAssetKey, marineHeroLoadUrls, marineHeroManifest,
+  extrasAreTwoHanded, marineHeroAssetKey, marineHeroLoadUrls, marineHeroManifest,
   MARINE_HERO_LOD_NAMES, materialTextures,
 } from './marine-hero-art.js';
 
@@ -77,7 +79,7 @@ function loadCultureKit(loader, key) {
   const names = key === DEFAULT_CULTURE ? c.assets : c.assets.filter((n) => !SHARED_KIT.has(n));
   KIT_LOADING[key] = Promise.all(names.map(async (name) => {
     try {
-      const gltf = await loader.loadAsync(`${c.kitPath}/${name}.glb`);
+      const gltf = await loadGlb(loader, `${c.kitPath}/${name}.glb`);
       const root = gltf.scene;
       root.traverse((o) => {
         if (!o.isMesh) return;
@@ -250,17 +252,11 @@ function storeTemplate(key, scene) {
   return true;
 }
 
-// Hero GLBs are Git LFS. A deployment that serves the pointer text (HTTP 200,
-// ~132 bytes, "version https://git-lfs...") must not reach the parser. The
-// caller then leaves the template empty so the existing hero mesh is used.
+// Hero paths stay repo-relative. loadGlb tries the asset host, then this
+// origin, and rejects a non-GLB body (including a Git LFS pointer, HTTP 200).
+// The caller then leaves the template empty so the existing hero mesh is used.
 async function readHeroScene(loader, url) {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`${url} HTTP ${response.status}`);
-  const bytes = await response.arrayBuffer();
-  if (!isGlbBytes(bytes)) throw new Error(`${url} is not a GLB`);
-  const gltf = await loader.parseAsync(bytes, '');
-  if (!gltf?.scene) throw new Error(`${url} has no scene`);
-  return gltf.scene;
+  return (await loadGlb(loader, url)).scene;
 }
 
 async function loadMarineHeroScene(loader, name, quality) {
@@ -293,7 +289,7 @@ export function loadAssets(options = {}) {
         if (!storeTemplate(key, scene)) marineHeroFailed(key);
         return;
       }
-      const gltf = await loader.loadAsync(url);
+      const gltf = await loadGlb(loader, url);
       storeTemplate(key, gltf.scene);
     } catch (e) {
       // Asset missing/unloadable — procedural fallback will be used.

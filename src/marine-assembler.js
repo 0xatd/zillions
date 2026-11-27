@@ -16,6 +16,7 @@
 // weapons are shared across marines; only the torso group is per-combination.
 import * as THREE from 'three';
 import { GLTFLoader } from '../vendor/GLTFLoader.js';
+import { loadGlb } from './asset-base.js';
 import { mergeGeometries } from '../vendor/utils/BufferGeometryUtils.js';
 import { pickMarine, hashSeed, marineFlag, CHAPTERS } from './marine-recipe.js';
 
@@ -48,10 +49,12 @@ function indexKit(gltf) {
 }
 
 // The low kit is optional: without it marines stay full detail.
+// Both files use the shared GLB host, then the same path on this origin.
 export function loadMarineKit(url = MARINE_KIT_URL, loader = new GLTFLoader(), loUrl = MARINE_KIT_LO_URL) {
   if (!loading) {
-    const lo = loUrl ? loader.loadAsync(loUrl).then(indexKit).catch(() => null) : Promise.resolve(null);
-    loading = Promise.all([loader.loadAsync(url).then(indexKit), lo]).then(([hi, low]) => {
+    const indexed = (target) => loadGlb(loader, target).then(indexKit);
+    const lo = loUrl ? indexed(loUrl).catch(() => null) : Promise.resolve(null);
+    loading = Promise.all([indexed(url), lo]).then(([hi, low]) => {
       KIT = hi;
       KIT_LO = low;
       return true;
