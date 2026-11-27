@@ -4,7 +4,7 @@ export function highestUnlockedLevel(campaignCleared = 0) {
 
 export function roomLevelEligibility(game) {
   const level = Math.max(1, Math.floor(Number(game?.level) || 1));
-  if ((game?.mode || 'campaign') !== 'campaign') {
+  if (game?.custom || (game?.mode || 'campaign') !== 'campaign') {
     return { eligible: true, level, blockers: [] };
   }
   const blockers = (game?._players || [])

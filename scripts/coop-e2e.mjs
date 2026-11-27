@@ -338,7 +338,7 @@ try {
     throw new Error(`${error.message} host=${JSON.stringify(await dump(host.page, host.notes))} guest=${JSON.stringify(await dump(guest.page, guest.notes))}`);
   });
   await host.page.locator('#s-start').click();
-  await host.page.locator('#screen-setup').waitFor({ state: 'hidden', timeout: 90000 });
+  await host.page.locator('#screen-setup').waitFor({ state: 'hidden', timeout: 90000 }).catch(async(error)=>{ throw new Error(`${error.message} host=${JSON.stringify(await dump(host.page,host.notes))} guest=${JSON.stringify(await dump(guest.page,guest.notes))}`); });
   await guest.page.locator('#screen-setup').waitFor({ state: 'hidden', timeout: 90000 });
   let synced = null;
   const deadline = Date.now() + 90000;

@@ -92,3 +92,11 @@ test('recruitment culture restricts new nonhuman recruits but not earned conques
  p.chapter.culture='coalition';assert.equal(recruitmentAllowed(p,'sniper'),true);
  p.campaign=0;assert.equal(recruitmentAllowed(p,'lina'),false);
 });
+
+test('deploying Vanguard retains the selected custom leader instead of switching to founder', () => {
+ const founder=makeMmoCharacter('Founder','vanguard','iron','human');
+ const second=makeMmoCharacter('Second','vanguard','cobalt','human');
+ const profile={mmoCharacters:[founder,second],mmoCharacterId:second.id,chapter:{founderId:founder.id}};
+ assert.equal(ensureDeployedLeader(profile,'vanguard').id,second.id);
+ assert.equal(profile.chapter.founderId,founder.id);
+});

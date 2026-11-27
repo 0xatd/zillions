@@ -192,7 +192,7 @@ export class OnlineLobby {
         this._touchPresence().catch(() => {});
         return;
       }
-      this._touchPresence().then(() => this.refreshOnline()).catch(() => {});
+      this._touchPresence().then(() => this.refreshOnline()).then(() => this.loadFriends()).catch(() => {});
     }, 15 * 1000);
     // Realtime is the fast path. This read-only fallback only refreshes the
     // room browser; it must not multiply presence writes for every player.
@@ -205,18 +205,20 @@ export class OnlineLobby {
       if (this.game && !this.matchActive) this.refreshCurrentGame().catch(() => {});
     }, ROOM_HEARTBEAT_MS);
 
-    this.sb.channel('zl-rooms-feed')
+    this._socialChannels = [];
+    const socialChannel = (name) => { const channel=this.sb.channel(name); this._socialChannels.push(channel); return channel; };
+    socialChannel('zl-rooms-feed')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => { if (!this.matchActive) this.refreshGames(); })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'room_players' }, () => { if (!this.matchActive) this.refreshGames(); })
       .subscribe();
 
-    this.sb.channel('zl-lobby-chat')
+    socialChannel('zl-lobby-chat')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'lobby_chat', filter: 'scope=eq.global' }, (m) => {
         this._emitLobbyChat(m.new).catch(() => {});
       })
       .subscribe();
 
-    this.sb.channel('zl-friends-feed')
+    socialChannel('zl-friends-feed')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, () => { if (!this.matchActive) this.loadFriends().catch(() => {}); })
       .subscribe();
 
@@ -280,6 +282,12 @@ export class OnlineLobby {
     const name = profileName(data);
     this.profileCache.set(userId, name);
     return name;
+  }
+
+  disconnect() {
+    for (const timer of [this._presenceBeat,this._gamesPoll,this._roomPoll,this._beat]) clearInterval(timer);
+    for (const channel of [...(this._socialChannels || []),this.userChan,this.gameChan,this.roomChatChan]) if (channel) this.sb?.removeChannel(channel);
+    this._socialChannels=[]; this.connected=false;
   }
 
   async loadFriends() {
@@ -366,19 +374,24 @@ export class OnlineLobby {
       mode: this.game.mode,
       roomId: this.game.id,
     };
-    const channel = this.sb.channel('zl-user-' + userId);
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('invite channel timeout')), 2500);
-      channel.subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          clearTimeout(timer);
-          resolve();
-        }
+    return this.sendSocialInvite(userId, payload);
+  }
+
+  async sendSocialInvite(userId, payload) {
+    const channel = this.sb.channel('zl-user-' + userId, { config:{ broadcast:{ ack:true } } });
+    let timer;
+    try {
+      await new Promise((resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('Invite timed out. Retry.')), 5000);
+        channel.subscribe(status => {
+          if (status === 'SUBSCRIBED') resolve();
+          else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') reject(new Error('Invite connection failed. Retry.'));
+        });
       });
-    });
-    await channel.send({ type: 'broadcast', event: 'invite', payload });
-    this.sb.removeChannel(channel);
-    return payload;
+      const result = await channel.send({ type:'broadcast', event:'invite', payload });
+      if (result !== 'ok') throw new Error('Invite was not delivered. Retry.');
+      return payload;
+    } finally { clearTimeout(timer); this.sb.removeChannel(channel); }
   }
 
   async loadChat() {

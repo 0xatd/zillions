@@ -13,7 +13,8 @@ const fail = (msg) => { console.error(`FAIL: ${msg}`); failures++; };
 const ok = (cond, msg) => { if (!cond) fail(msg); };
 
 const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
-const ui = readFileSync(new URL('../src/ui.js', import.meta.url), 'utf8');
+const ui = readFileSync(new URL('../src/ui.js', import.meta.url), 'utf8')
+  + readFileSync(new URL('../src/shell-markup.js', import.meta.url), 'utf8');
 const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
 
 // ---------- the table itself ----------

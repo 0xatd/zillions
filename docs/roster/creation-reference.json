@@ -1,0 +1,107 @@
+{
+  "source": "https://api.opendota.com/api/heroStats",
+  "retrievedAt": "2026-11-26",
+  "ranking": "pub_pick descending; snapshot only",
+  "heroes": [
+    {
+      "id": 14,
+      "name": "Pudge",
+      "pub_pick": 1071869
+    },
+    {
+      "id": 26,
+      "name": "Lion",
+      "pub_pick": 888680
+    },
+    {
+      "id": 44,
+      "name": "Phantom Assassin",
+      "pub_pick": 844011
+    },
+    {
+      "id": 35,
+      "name": "Sniper",
+      "pub_pick": 777335
+    },
+    {
+      "id": 7,
+      "name": "Earthshaker",
+      "pub_pick": 770089
+    },
+    {
+      "id": 86,
+      "name": "Rubick",
+      "pub_pick": 729292
+    },
+    {
+      "id": 30,
+      "name": "Witch Doctor",
+      "pub_pick": 658156
+    },
+    {
+      "id": 74,
+      "name": "Invoker",
+      "pub_pick": 657382
+    },
+    {
+      "id": 32,
+      "name": "Riki",
+      "pub_pick": 646601
+    },
+    {
+      "id": 84,
+      "name": "Ogre Magi",
+      "pub_pick": 612107
+    },
+    {
+      "id": 2,
+      "name": "Axe",
+      "pub_pick": 604100
+    },
+    {
+      "id": 21,
+      "name": "Windranger",
+      "pub_pick": 598226
+    },
+    {
+      "id": 12,
+      "name": "Phantom Lancer",
+      "pub_pick": 592187
+    },
+    {
+      "id": 8,
+      "name": "Juggernaut",
+      "pub_pick": 585674
+    },
+    {
+      "id": 27,
+      "name": "Shadow Shaman",
+      "pub_pick": 585181
+    },
+    {
+      "id": 71,
+      "name": "Spirit Breaker",
+      "pub_pick": 579904
+    },
+    {
+      "id": 5,
+      "name": "Crystal Maiden",
+      "pub_pick": 567346
+    },
+    {
+      "id": 104,
+      "name": "Legion Commander",
+      "pub_pick": 531665
+    },
+    {
+      "id": 42,
+      "name": "Wraith King",
+      "pub_pick": 531379
+    },
+    {
+      "id": 102,
+      "name": "Abaddon",
+      "pub_pick": 525686
+    }
+  ]
+}

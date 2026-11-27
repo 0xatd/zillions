@@ -5,7 +5,8 @@ import { readFileSync } from 'node:fs';
 
 const read = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
 const main = read('src/main.js');
-const ui = read('src/ui.js');
+const uiCode = read('src/ui.js');
+const ui = uiCode + '\n' + read('src/shell-markup.js');
 const game = read('src/game.js');
 const keybinds = read('src/keybinds.js');
 const online = read('src/online.js');
@@ -22,11 +23,12 @@ assert.match(main, /!this\.game && this\.titleSpace[\s\S]*_updateTitleSpace\(t\)
 assert.match(auth, /signInWithEmail\(email\)[\s\S]*signInWithOtp\([\s\S]*emailRedirectTo: `\$\{location\.origin\}\/`/,
   'email sign-in must use a same-origin passwordless magic link');
 assert.doesNotMatch(ui, /id="a-enter"/, 'the signed-out login screen must never become signed-in account home');
-assert.match(ui, /id="m-enter-world">DEPLOY</, 'Character Select must own Deploy');
-assert.match(ui, /id="m-custom">CUSTOM GAMES</, 'Character Select must retain Custom Games');
-assert.doesNotMatch(ui, /id="ow-|screen-world-menu/, 'the removed overworld HUD and Game Menu must not return');
+assert.match(ui, /id="m-enter-world"/, 'Campaign enters the overworld');
+assert.match(ui, /id="m-custom"/, 'Custom stays on the play hub');
+assert.doesNotMatch(ui, /id="ow-|id="screen-world-menu"|id="living-world-map"/, 'the removed living-world HUD must not return');
+assert.match(ui, /id="screen-overworld"/, 'the campaign star system is a menu, not the removed living world');
 assert.match(main, /_openCampaignSelect\([^)]*\)[\s\S]*showSetup\(\{ mode: 'campaign', level \}\)/,
-  'Enter World must open the campaign mission select directly');
+  'assaulting a site opens the campaign mission select');
 assert.match(main, /status\.signedIn && !status\.needsUsername && !this\._authenticatedEntryHandled[\s\S]*_showScreen\('main'\)[\s\S]*showCharacterCreator\(\)/,
   'authenticated entry must open Character Select or character creation');
 assert.match(main, /_createMmoCharacter[\s\S]*this\.ui\._showScreen\('main'\)/,
@@ -34,8 +36,9 @@ assert.match(main, /_createMmoCharacter[\s\S]*this\.ui\._showScreen\('main'\)/,
 assert.match(ui, /id="m-logout">LOG OUT</, 'the signed-in roster must expose an explicit logout action');
 assert.match(ui, /#m-logout'\)\.onclick = \(\) => this\.cb\.onSignOut/, 'logout must call auth instead of repainting the title');
 assert.match(main, /async _signOut\(\)[\s\S]*this\.auth\.signOut\(\)/, 'the shell must sign out of the account backend');
-assert.match(ui, /id="fight-kit"[\s\S]*d\.aura[\s\S]*d\.passives[\s\S]*heroAbilities\(d\)/, 'Fight mode must render the hero aura, passives, and active ability');
-assert.match(ui, /#fight-kit'\)\?\.classList\.toggle\('hidden', !fighting/, 'the complete hero kit must appear in Fight mode');
+assert.match(ui, /id="fight-kit"/, 'Fight mode must have a kit host');
+assert.match(uiCode, /d\.aura[\s\S]*d\.passives[\s\S]*heroAbilities\(d\)/, 'Fight mode must render the hero aura, passives, and active ability');
+assert.match(uiCode, /#fight-kit'\)\?\.classList\.toggle\('hidden', !fighting/, 'the complete hero kit must appear in Fight mode');
 
 // Build and Fight are explicit action contexts. Space builds in Build mode and
 // dodges in Fight mode; Q only casts in Fight mode. Movement stays shared.
@@ -49,7 +52,7 @@ assert.match(main, /case 'build':[\s\S]*_tryFound\(\)/, 'Build must found the ci
 assert.match(keybinds, /Toggle Build \/ Fight mode/, 'Alt must describe the contextual mode switch');
 
 for (const stale of ['SPACE/Q', 'Hold SPACE/B', 'Space fires the hero special', 'Space/B builds', 'ALT fight', 'Press <kbd>3</kbd>']) {
-  assert.ok(!ui.includes(stale), `UI still advertises the removed control contract: ${stale}`);
+  assert.ok(!uiCode.includes(stale) && !read('src/shell-markup.js').includes(stale), `UI still advertises the removed control contract: ${stale}`);
 }
 assert.ok(!game.includes('press SPACE to found'), 'simulation messages still advertise Space as Build');
 for (const id of ['dodge', 'ability1', 'build', 'build_mode', 'stance_push', 'tower_priority']) {
@@ -66,7 +69,7 @@ assert.doesNotMatch(main, /if \(u\.hero && this\.mpRole === 'guest'/,
   'local movement lead must not shift every hero on a guest client');
 assert.match(online, /this\._presenceBeat = setInterval[\s\S]*}, 15 \* 1000\);/, 'presence writes must stay on the slower heartbeat');
 assert.match(online, /this\._gamesPoll = setInterval[\s\S]*refreshGames\(\)[\s\S]*}, 5 \* 1000\);/, 'the read-only lobby fallback must self-heal within five seconds');
-assert.match(ui, /creator-cancel[\s\S]*_backOverlay/, 'founder creation must return to the chapter without trapping navigation');
+assert.match(uiCode, /creator-cancel[\s\S]*_backOverlay/, 'founder creation must return to the chapter without trapping navigation');
 assert.match(css, /\.endpanel \.startbtn \{[\s\S]*position: sticky; bottom: 0/,
   'retry/continue must remain reachable on short screens');
 

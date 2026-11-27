@@ -12,6 +12,8 @@ import { toyMat } from './toy-style.js';
 import { applyRim } from './tactical-visuals.js';
 import { itemInfo } from './config.js';
 import { COSMETIC_RENDERERS } from './cosmetics.js';
+import { mergeGeometries } from '../vendor/utils/BufferGeometryUtils.js';
+import { assembleCharacterHead } from './marine-assembler.js';
 
 // Warm daylight rim on friendly silhouettes (same grammar main.js used).
 const M = (c, e = 0) => applyRim(
@@ -43,6 +45,33 @@ const cyl = (parent, mat, r1, r2, h, x, y, z, rx = 0, ry = 0, rz = 0, seg = 8) =
   mesh(parent, new THREE.CylinderGeometry(r1, r2, h, seg), mat, x, y, z, rx, ry, rz);
 const cone = (parent, mat, r, h, x, y, z, rx = 0, ry = 0, rz = 0, seg = 6) =>
   mesh(parent, new THREE.ConeGeometry(r, h, seg), mat, x, y, z, rx, ry, rz);
+
+// Batch static armor within each animated limb; never combine independent pivots.
+function batchArmor(group) {
+  const batches = new Map();
+  for (const part of group.children) {
+    if (!part.isMesh || !part.visible || Array.isArray(part.material)) continue;
+    const m = part.material;
+    if (m.type !== 'MeshLambertMaterial' || m.map) continue;
+    const key = [m.color.getHex(), m.emissive.getHex(), m.emissiveIntensity, m.flatShading, m.side, m.opacity].join(':');
+    if (!batches.has(key)) batches.set(key, []);
+    batches.get(key).push(part);
+  }
+  for (const parts of batches.values()) {
+    if (parts.length < 2) continue;
+    const geometries = parts.map(part => {
+      part.updateMatrix();
+      const geometry = part.geometry.index ? part.geometry.toNonIndexed() : part.geometry.clone();
+      return geometry.applyMatrix4(part.matrix);
+    });
+    const geometry = mergeGeometries(geometries, false);
+    for (const g of geometries) g.dispose();
+    if (!geometry) continue;
+    const combined = mesh(group, geometry, parts[0].material);
+    combined.receiveShadow = parts[0].receiveShadow;
+    for (const part of parts) { group.remove(part); part.geometry.dispose(); }
+  }
+}
 
 // ---------------- the shared rig ----------------
 // Origin at the feet, +Z forward. Legs pivot at the hip, arms at the
@@ -416,7 +445,27 @@ export function playerHeroVisualState(u) {
   return { race, appearance: style.appearance || 'iron', role: roleFamily(style.classKey), identity, gear, gearInfo };
 }
 
+// Low-cost chamfer: 48 triangles per plate, shared across all character views.
+function armorGeometry(w, h, d) {
+  const g = new THREE.BoxGeometry(w, h, d, 2, 2, 2);
+  const a = g.attributes.position, r = Math.min(w, h, d) * .16;
+  const half = new THREE.Vector3(w / 2 - r, h / 2 - r, d / 2 - r);
+  const p = new THREE.Vector3(), core = new THREE.Vector3();
+  for (let i = 0; i < a.count; i++) {
+    p.fromBufferAttribute(a, i);
+    core.copy(p).clamp(half.clone().negate(), half);
+    p.sub(core).normalize().multiplyScalar(r).add(core);
+    a.setXYZ(i, p.x, p.y, p.z);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
 function playerHero(u) {
+  // Beveled armor catches menu key/rim lighting while retaining the exact
+  // equipment, identity and animation groups used in battle.
+  const box = (parent, mat, w, h, d, x, y, z, rx = 0, ry = 0, rz = 0) =>
+    mesh(parent, armorGeometry(w, h, d), mat, x, y, z, rx, ry, rz);
   const style = u.characterStyle || {};
   const state = playerHeroVisualState(u);
   const { race, identity, gear, gearInfo } = state;
@@ -441,9 +490,9 @@ function playerHero(u) {
     // These large forms remain readable at creator and gameplay scale.
     rig.head.children[0].visible = false;
     const skin = M(0xd8c6ad), shadow = M(0x7b5747), mark = M(custom.face === 'nomad' ? 0x315b66 : 0x4a3229);
-    box(rig.head, skin, .18, .18, .14, 0, .035, .005);
-    box(rig.head, skin, .145, .12, .045, 0, .015, .088);
-    box(rig.head, shadow, .12, .045, .105, 0, -.085, .018);
+    sph(rig.head, skin, .102, 0, .035, .005, .91, 1.14, .85);
+    sph(rig.head, skin, .082, 0, .005, .052, .9, 1.03, .7);
+    sph(rig.head, shadow, .066, 0, -.057, .03, 1, .52, .85);
     box(rig.head, skin, .075, .07, .075, 0, -.105, -.005);
     for (const x of [-.046, .046]) box(rig.head, M(0x18212a), .033, .018, .012, x, .04, .118);
     cone(rig.head, skin, .025, .06, 0, .005, .132, Math.PI / 2, 0, 0, 5);
@@ -452,10 +501,34 @@ function playerHero(u) {
     if (custom.face === 'ranger') box(rig.head, mark, .12, .022, .014, 0, .082, .116, 0, 0, -.12);
     if (custom.face === 'veteran') box(rig.head, M(0xa77969), .018, .115, .014, .055, .005, .118, 0, 0, -.28);
     if (custom.face === 'nomad') { box(rig.head, mark, .18, .025, .014, 0, .06, .116); box(rig.head, skin, .07, .035, .02, 0, -.055, .12); }
-    for (const arm of [rig.limbs.armL, rig.limbs.armR]) arm.children[0].scale.set(.48, .5, .55);
+    // Broad layered power-armor silhouette, not bare capsule limbs.
+    for (const [i, arm] of [rig.limbs.armL, rig.limbs.armR].entries()) {
+      arm.children[0].scale.set(1.22, .8, 1.15);
+      const sign = i ? 1 : -1;
+      box(arm, M(shade(color, .48)), .22, .045, .22, sign * .018, -.025, 0, 0, 0, sign * -.1);
+      box(arm, M(color), .12, .14, .13, 0, -.25, .02);
+      box(arm, M(0xc7c0aa), .09, .025, .14, 0, -.31, .02);
+    }
+    rig.torso.children[2].visible = false;
+    for (const sign of [-1, 1]) {
+      box(rig.torso, M(color), .16, .14, .09, sign * .082, .22, .12, 0, 0, sign * .12);
+      box(rig.torso, M(0xb9b4a3), .105, .022, .018, sign * .07, .225, .17, 0, 0, sign * .12);
+    }
+    box(rig.torso, M(0x21313b), .08, .18, .055, 0, .13, .14);
+    box(rig.torso, M(0x88c7dc, .35), .035, .035, .018, 0, .24, .18);
+    for (const leg of [rig.limbs.legL, rig.limbs.legR]) {
+      box(leg, M(color), .115, .13, .12, 0, -.1, .025);
+      box(leg, M(shade(color, .7)), .115, .15, .115, 0, -.29, .02);
+      box(leg, M(0xc7c0aa), .11, .055, .09, 0, -.2, .045);
+      box(leg, M(0x26313b), .13, .09, .19, 0, -.4, .065);
+    }
     if (custom.head === 'cropped') box(rig.head, M(0x342a24), .18, .035, .14, 0, .115, -.005);
     if (custom.head === 'swept') { box(rig.head, M(0x5a3f2d), .19, .045, .15, -.018, .125, -.005, 0, 0, -.16); cone(rig.head, M(0x5a3f2d), .045, .16, .075, .19, -.02, 0, 0, -.35); }
     if (custom.head === 'shaved') sph(rig.head, M(0xb89c83), .107, 0, .045, 0, .97, 1.02, .96);
+  }
+  if (race === 'human') {
+    const sculpt = assembleCharacterHead(identity);
+    if (sculpt) { for (const part of rig.head.children) part.visible = false; rig.head.add(sculpt); }
   }
   if (custom.head === 'crest') box(rig.head, M(0xe4bf55), .045, .13, .16, 0, .14, -.02);
   if (custom.head === 'antenna' || custom.head === 'dish') {
@@ -553,14 +626,17 @@ function playerHero(u) {
   // Marked gear gets one cyan pip; Prime gear adds a paired amber pip.
   const rarityAccent = (parent, rarity, x, y, z) => {
     if (rarity < 2) return;
-    sph(parent, M(rarity >= 3 ? 0xe0b34b : 0x6fa8dc, .75), .018, x, y, z, 1, 1, .5);
-    if (rarity >= 3) sph(parent, M(0xe0b34b, .75), .018, -x, y, z, 1, 1, .5);
+    // Tiny armor studs need eight faces, not a full 140-triangle sphere.
+    const pip = (px, color) => mesh(parent, new THREE.OctahedronGeometry(.018, 0), M(color, .75), px, y, z).scale.set(1, 1, .5);
+    pip(x, rarity >= 3 ? 0xe0b34b : 0x6fa8dc);
+    if (rarity >= 3) pip(-x, 0xe0b34b);
   };
   rarityAccent(rig.head, gearInfo.head.rarity, .055, .1, .12);
   rarityAccent(rig.torso, gearInfo.chest.rarity, .1, .29, .19);
   rarityAccent(rig.limbs.armR, gearInfo.hands.rarity, .035, -.31, .1);
   rarityAccent(rig.limbs.legR, gearInfo.legs.rarity, .03, -.23, .09);
   rarityAccent(rig.limbs.legL, gearInfo.boots.rarity, .03, -.39, .14);
+  for (const group of [rig.head, rig.torso, ...Object.values(rig.limbs)]) batchArmor(group);
   rifle(rig.root, weapons, { len: .72, y: .58 });
   return { node: rig.root, limbs: rig.limbs, weaponParts: weapons };
 }

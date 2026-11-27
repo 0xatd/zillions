@@ -27,18 +27,21 @@ The startup flow is:
 ```text
 index.html
   -> src/main.js
-     -> account gate
-     -> chapter identity + founder creation, or existing chapter campaign
-     -> Deploy -> mission select, Custom Games, or an online room
+     -> title word list over the live planet
+     -> account sign-in, or guest play
+     -> character select
+     -> leader roster → Enter World (campaign); Other battles is secondary
+     -> mission setup and staging
      -> deterministic siege
-     -> end screen with server-confirmed rewards
-     -> chapter campaign and recruited companions
+     -> results, then back to the overworld or play hub
      -> Three.js render loop
 ```
 
-`src/shell-state.js` owns the shell base state and temporary overlay state.
-Character Select is the normal signed-in base state. Menus are temporary
-overlays. There is no overworld; the living world was removed.
+`src/nav/router.js` owns the menu route stack, back, the one modal, the toast
+queue, and which routes can open during a match. `src/shell-state.js` re-exports
+that router. Character select sets the active character. The secondary mode browser reads
+`src/modes.js`. Menus are temporary overlays. The campaign overworld is that
+menu's star system. The persistent living world stays removed.
 
 `src/main.js` composes the system. Keep domain rules in smaller modules when a
 module already owns that rule.
@@ -114,8 +117,11 @@ procedural renderer and must not stop a match from starting.
 | File | Ownership |
 | --- | --- |
 | `src/main.js` | Runtime composition, render loop, input, save flow, co-op sequencing, and Watch |
-| `src/ui.js` | Main menu, setup, lobby, room, HUD, and overlays |
-| `src/shell-state.js` | Auth, character, mission, overlay, and return state |
+| `src/ui.js` | Menus, setup, staging, HUD, and overlays. Markup is `src/shell-markup.js`. |
+| `src/nav/router.js` | Route stack, back, modal, toasts, and match-allowed routes |
+| `src/modes.js` | Play-hub mode registry |
+| `src/shell-state.js` | Re-export of the navigation router |
+| `shell.css` | Menu tokens, glass panels, and HUD lanes |
 | `src/match-outbox.js` | Signed-in match reports the server has not confirmed yet, resent with the same requestId |
 | `src/runtime-guard.js` | Fatal frame-loop recovery |
 | `style.css` | Application layout and visual styles |
@@ -487,3 +493,10 @@ cannot release the new start barrier. No player is silently removed from an
 already prepared simulation. Account-room relay packets are reassembled and
 delivered in sender order, including after loss/retry, with a bounded reorder
 buffer. A later Stop cannot be overtaken by a retried movement command.
+
+## Leader entry shell
+
+The roster and six-step creation flow live in `src/ui.js` and
+`src/shell-markup.js`. `src/nav/router.js` owns menu history and live-match
+guards. `src/leader-archetypes.js` is disabled roadmap metadata, not game kits.
+See `leader-navigation.md` for current boundaries.

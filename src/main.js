@@ -27,7 +27,7 @@ import { Game, runScore, isCompatibleSnapshot } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
 import { loadAssets, loadKitCulture, assetClone, assetPart, hasKit, kitClone, kitMaterials, kitGeometry } from './assets.js';
-import { loadMarineKit, marineForUnit, setMarineLod, MARINE_FLAGS } from './marine-assembler.js';
+import { loadMarineKit, marineKitReady, marineForUnit, setMarineLod, MARINE_FLAGS } from './marine-assembler.js';
 import { NetSession } from './net.js';
 import { getSupabaseClient } from './supabase.js';
 import {
@@ -296,6 +296,9 @@ class App {
       onAddPeer: () => this._newInvite(),
       onHeroPick: (k) => this._pickHero(k),
       onPartyOpen: () => this._openFriendParty(),
+      onSocialOpen: () => this._openSocial(),
+      onSocialClose: () => { clearInterval(this._socialTimer); this._socialGeneration = (this._socialGeneration || 0) + 1; },
+      onInviteParty: (userId) => this._inviteToParty(userId),
       onChapterSave: (draft) => this._saveChapter(draft),
       onChapterRecruit: (key) => this._recruitChapterLeader(key).catch(() => {}),
       onChapterMission: (level) => this._openCampaignSelect(level),
@@ -335,11 +338,16 @@ class App {
         unlocked: Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1),
         hero: this.ui.selectedHero,
       }),
-      onQuit: () => location.reload(),
+      onQuit: () => this._quitToMenu(),
       onPause: () => this.togglePauseMenu(),
       onResume: () => this.closePauseMenu(),
       onContinue: () => this.continueGame(),
-      onCampaignMap: () => this._openCampaignSelect(),
+      onCampaignMap: () => this._openOverworld(),
+      onEnterWorld: () => this._enterLeaderWorld(),
+      onLeaderEntry: () => {
+        if (!this.auth?.isSignedIn()) { this._guestSession = true; this.ui.noteGuestSession(); }
+        this.ui._accountAccepted = true;
+      },
       onGuestPlay: () => this._playAsGuest(),
       onDailyOpen: () => this._openDaily(),
       onDailyPlay: () => this._startDaily(),
@@ -514,6 +522,7 @@ class App {
     void getSupabaseClient().then((client) => {
       try { client.realtime?.connect?.(); } catch { /* the invite subscribe connects too */ }
     }).catch(() => {});
+    this._returnCustom = sessionStorage.getItem('zillions-return-custom') === '1';
     this._consumeShareLink();
     this._bootReplay();
     this.ui.setAccount(this.authStatus);
@@ -700,6 +709,44 @@ class App {
     );
     group.add(orbitalGlow);
 
+    const system = new THREE.Group();
+    system.name = 'star-system';
+    const planetSpecs = [
+      { id: 'earth', color: 0x3c8f6b, emissive: 0x123828, radius: 8.4, x: 0, y: 0, z: 0 },
+      { id: 'cinder', color: 0x6d4636, emissive: 0x24140e, radius: 4.4, x: 18, y: 11, z: -8 },
+      { id: 'verge', color: 0x3c4d68, emissive: 0x121824, radius: 5.2, x: 13, y: -12, z: -2 },
+      { id: 'reach', color: 0x56485f, emissive: 0x1a1520, radius: 3.6, x: -16, y: 8, z: -12 },
+    ];
+    const planets = planetSpecs.map((spec) => {
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(spec.radius, 9, 7),
+        toyMat({ color: spec.color, emissive: spec.emissive, emissiveIntensity: spec.id === 'earth' ? 0.45 : 0.12 }),
+      );
+      mesh.position.set(spec.x, spec.y, spec.z);
+      if (spec.id !== 'earth') mesh.material.transparent = true, mesh.material.opacity = 0.72;
+      const shell = new THREE.Mesh(
+        new THREE.SphereGeometry(spec.radius * 1.08, 9, 7),
+        new THREE.MeshBasicMaterial({ color: spec.id === 'earth' ? 0x8fd4ff : 0x667088, transparent: true, opacity: spec.id === 'earth' ? 0.22 : 0.08, side: THREE.BackSide, depthWrite: false, fog: false }),
+      );
+      mesh.add(shell);
+      if (spec.id === 'earth') {
+        for (let i = 0; i < 5; i++) {
+          const mark = new THREE.Mesh(
+            new THREE.SphereGeometry(0.45, 5, 4),
+            toyMat({ color: 0xf1bf66, emissive: 0xf1bf66, emissiveIntensity: 0.8 }),
+          );
+          const a = i * 1.27;
+          mark.position.set(Math.cos(a) * 6.2, Math.sin(a * 1.4) * 3.4, Math.sin(a) * 5.4);
+          mesh.add(mark);
+        }
+      }
+      system.add(mesh);
+      return { id: spec.id, mesh };
+    });
+    group.add(system);
+    this._systemShift = new THREE.Vector3();
+    this._systemT = 0;
+
     const ships = new THREE.Group();
     for (let i = 0; i < 5; i++) {
       const ship = new THREE.Mesh(new THREE.BoxGeometry(5 + i * 0.7, 0.8, 1.8), new THREE.MeshBasicMaterial({ color: 0x24384d }));
@@ -737,7 +784,7 @@ class App {
     const heroLight = new THREE.PointLight(heroDef.color || 0x65a9ff, 2.2, 16, 1.8);
     heroLight.visible = !!titleCharacter;
     group.add(heroLight);
-    group.userData = { atmosphere, constellations, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight };
+    group.userData = { atmosphere, limb: planet, constellations, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight, system, planets };
     this.titleSpace = group;
     this.scene.add(group);
     this.scene.background = new THREE.Color(0x020711);
@@ -747,11 +794,18 @@ class App {
 
   _updateTitleSpace(t) {
     if (!this.titleSpace) return;
-    const { atmosphere, constellations, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight } = this.titleSpace.userData;
-    const showTitleCharacter = !!selectedMmoCharacter(this.profile);
+    const { atmosphere, limb, constellations, orbitalGlobe, orbitalGlow, signals, ships, streaks, titleHero, heroPedestal, heroLight, system, planets } = this.titleSpace.userData;
+    const systemView = this._systemViewActive();
+    const showTitleCharacter = !!selectedMmoCharacter(this.profile) && !systemView;
     titleHero.visible = showTitleCharacter;
     heroPedestal.visible = showTitleCharacter;
     heroLight.visible = showTitleCharacter;
+    if (limb) limb.visible = !systemView;
+    atmosphere.visible = !systemView;
+    orbitalGlobe.visible = !systemView;
+    orbitalGlow.visible = !systemView;
+    if (system) system.visible = systemView;
+    if (systemView) this._easeSystem(t, system, planets);
     atmosphere.material.opacity = 0.1 + Math.sin(t * 0.35) * 0.025;
     const cameraLocal = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(this.camera.quaternion).add(this.camera.position);
     constellations.position.copy(cameraLocal(0, 0, 0));
@@ -759,6 +813,13 @@ class App {
     orbitalGlobe.position.copy(cameraLocal(18, -36, -210));
     orbitalGlow.position.copy(orbitalGlobe.position);
     orbitalGlobe.rotation.y = t * 0.025;
+    if (this._loadingZoom) {
+      this._loadZoom = Math.min(0.22, (this._loadZoom || 0) + 0.008);
+      orbitalGlobe.scale.setScalar(1 + this._loadZoom);
+    } else if (this._loadZoom) {
+      this._loadZoom = 0;
+      orbitalGlobe.scale.setScalar(1);
+    }
     signals.material.opacity = 0.55 + Math.sin(t * 2.1) * 0.18;
     const heroPos = cameraLocal(7.8, -4.5, -18);
     titleHero.position.copy(heroPos);
@@ -779,6 +840,69 @@ class App {
       s.position.set(MAP_SIZE / 2 - 55 + i * 34 + p * 22, 78 - p * 72, MAP_SIZE / 2 - 82 + i * 5);
       s.material.opacity = Math.sin(p * Math.PI) * 0.75;
     }
+    if (systemView) this._layoutSystemMarkers();
+  }
+
+  _systemViewActive() {
+    if (this.game || !this.titleSpace) return false;
+    const screen = this.ui?.root?.querySelector?.('#screen-overworld');
+    const overlay = this.ui?.root?.querySelector?.('#overlay');
+    return !!screen && !screen.classList.contains('hidden') && !!overlay && !overlay.classList.contains('hidden');
+  }
+
+  _easeSystem(t, system, planets) {
+    const dt = Math.min(0.05, Math.max(0, t - (this._systemT || t)));
+    this._systemT = t;
+    const id = this.ui?._focusedPlanet || 'earth';
+    const body = planets.find((planet) => planet.id === id) || planets[0];
+    if (!this._systemShift) this._systemShift = new THREE.Vector3();
+    const goal = body.mesh.position.clone().multiplyScalar(-1);
+    this._systemShift.lerp(goal, 1 - Math.exp(-dt * 3.4));
+    const cameraLocal = (x, y, z) => new THREE.Vector3(x, y, z).applyQuaternion(this.camera.quaternion).add(this.camera.position);
+    const anchor = window.innerWidth <= 760 ? cameraLocal(0, 10, -105) : cameraLocal(-18, -1, -76);
+    const shift = this._systemShift.clone().applyQuaternion(this.camera.quaternion);
+    system.position.copy(anchor).add(shift);
+    system.quaternion.copy(this.camera.quaternion);
+    for (const planet of planets) planet.mesh.rotation.y = t * (planet.id === 'earth' ? 0.12 : 0.05);
+  }
+
+  _layoutSystemMarkers() {
+    const planets = this.titleSpace?.userData?.planets;
+    const system = this.titleSpace?.userData?.system;
+    if (!planets || !system || !this.ui?.root) return;
+    system.updateMatrixWorld(true);
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const point = this._menuProjV || new THREE.Vector3();
+    this._menuProjV = point;
+    const project = (object) => {
+      object.getWorldPosition(point);
+      point.project(this.camera);
+      return { x: (point.x * 0.5 + 0.5) * width, y: (-point.y * 0.5 + 0.5) * height };
+    };
+    const spanOf = (planet, at) => {
+      const radius = planet.mesh.geometry.parameters.radius;
+      const edge = system.localToWorld(planet.mesh.position.clone().add(new THREE.Vector3(radius, 0, 0)));
+      edge.project(this.camera);
+      return Math.max(72, Math.min(320, Math.abs((edge.x * 0.5 + 0.5) * width - at.x) * 2));
+    };
+    for (const planet of planets) {
+      const label = this.ui.root.querySelector(`#system-labels [data-planet="${planet.id}"]`);
+      if (!label) continue;
+      const at = project(planet.mesh);
+      const span = spanOf(planet, at);
+      label.style.left = `${at.x}px`;
+      label.style.top = `${at.y + span * 0.58}px`;
+    }
+    const earth = planets.find((planet) => planet.id === 'earth');
+    const map = this.ui.root.querySelector('#chapter-map');
+    if (!earth || !map || map.classList.contains('hidden')) return;
+    const at = project(earth.mesh);
+    const span = spanOf(earth, at);
+    map.style.left = `${at.x - span / 2}px`;
+    map.style.top = `${at.y - span / 2}px`;
+    map.style.width = `${span}px`;
+    map.style.height = `${span}px`;
   }
 
   _clearMenuBackdrop() {
@@ -810,17 +934,25 @@ class App {
       renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
       const scene = new THREE.Scene();
       const camera = new THREE.PerspectiveCamera(32, 1, .1, 20);
-      camera.position.set(2.5, 1.45, 3.4);
-      camera.lookAt(0, .65, 0);
-      scene.add(new THREE.HemisphereLight(0xcceaff, 0x10141c, 2.2));
-      const key = new THREE.DirectionalLight(0xffe2b5, 2.4); key.position.set(3, 4, 4); scene.add(key);
+      camera.position.set(1.65, 1.3, 3.6);
+      camera.lookAt(0, .8, 0);
+      scene.add(new THREE.HemisphereLight(0xcceaff, 0x10141c, 1.15));
+      const key = new THREE.DirectionalLight(0xffe2b5, 2.0); key.position.set(3, 4, 4); scene.add(key);
+      const rim = new THREE.DirectionalLight(0x8acbe7, 2.1); rim.position.set(-3, 2, -2); scene.add(rim);
+      const contact = new THREE.Mesh(new THREE.CircleGeometry(.28, 32), new THREE.MeshBasicMaterial({color:0x03090e,transparent:true,opacity:.24,depthWrite:false}));
+      contact.rotation.x = -Math.PI / 2; contact.position.y = -.035; contact.scale.y = .65; scene.add(contact);
       p = { renderer, scene, camera, canvas, model: null };
       this.characterPreviews.set(canvas.id, p);
+    }
+    p.style = style;
+    if (!marineKitReady() && !p.kitRequested) {
+      p.kitRequested = true;
+      loadMarineKit().then(ready => { if (ready && p.canvas.isConnected) this._setCharacterPreview(p.style); });
     }
     if (p.model) { p.scene.remove(p.model); this._disposeObject3D(p.model); }
     const key = style.proxyHero || 'scott';
     p.model = buildUnitModel({ hero: true, key, def: HEROES[key] || HEROES.scott, characterStyle: style.chapterLeader ? null : style }).node;
-    p.model.scale.setScalar(1.45);
+    p.model.scale.setScalar(1.6);
     p.model.position.y = -.02;
     p.scene.add(p.model);
   }
@@ -833,7 +965,7 @@ class App {
       if (p.canvas.width !== Math.round(w * p.renderer.getPixelRatio()) || p.canvas.height !== Math.round(h * p.renderer.getPixelRatio())) {
         p.renderer.setSize(w, h, false); p.camera.aspect = w / h; p.camera.updateProjectionMatrix();
       }
-      p.model.rotation.y = Math.sin(t * .55) * .35;
+      p.model.rotation.y = matchMedia('(prefers-reduced-motion: reduce)').matches ? -.1 : -.1 + Math.sin(t * .35) * .12;
       p.renderer.render(p.scene, p.camera);
     }
   }
@@ -843,8 +975,10 @@ class App {
   // carries the match seed every peer runs, the room the match is credited
   // to, and makes the end-of-match report single use. Signed-out play needs
   // no ticket and keeps the fixed seed it always had.
+  _isCustomBattle() { return this.lobby?.game ? isCustomGame(this.lobby.game) : !!this.ui._customBattle; }
+
   async _requestMatchTicket({ levelId, mode, difficulty, roomId = null, joinToken = null, manualCoop = false, hero = null }) {
-    if (!this.auth?.isSignedIn() || this.mpRole === 'spectator') return null;
+    if (this._isCustomBattle() || !this.auth?.isSignedIn() || this.mpRole === 'spectator') return null;
     const character = selectedMmoCharacter(this.profile);
     if (!character) return null;
     try {
@@ -966,6 +1100,7 @@ class App {
   // ---------------- game start ----------------
 
   async startGame(difficulty, heroKey, mp = null, snap = null) {
+    this._customBattle = this._isCustomBattle();
     this._seedRun = !!this._startingSeedRun;
     this._startingSeedRun = false;
     this.pendingAbility = null;
@@ -984,7 +1119,7 @@ class App {
     // so early windows are not discarded when the sim is initialized.
     const matchInbox = inboxForMatchStart(mp?.role, this.inbox);
     this.audio.init();
-    this._clearMenuBackdrop();
+    this._loadingZoom = true;
     if (!this.assetsLoaded) {
       this.ui.setDeploymentLoading(true, null, 'Loading expedition assets');
       await this._loadArt();
@@ -1022,7 +1157,7 @@ class App {
     if (mp?.role !== 'spectator') {
       this.game.inputLog = snap ? (this._match.log ? [...this._match.log] : null) : [];
     }
-    if (mode !== 'daily' && this.auth?.isSignedIn() && mp?.role !== 'spectator' && !this._match.ticket && !this._match.ticketPromise) {
+    if (!this._customBattle && mode !== 'daily' && this.auth?.isSignedIn() && mp?.role !== 'spectator' && !this._match.ticket && !this._match.ticketPromise) {
       this.ui.showBanner(`Rewards are unavailable for this match (${this._match.error || 'no match ticket'}).`, 'bad', 6000);
     }
     this._preparingBattlefield = true;
@@ -1038,6 +1173,7 @@ class App {
     this._netClockLast = performance.now();
     this.acc = 0;
     } catch (error) {
+      this._loadingZoom = false;
       this._finishMissionIntro();
       throw error;
     } finally {
@@ -1049,6 +1185,8 @@ class App {
 
   // Shared battlefield presentation for a live match and a replay.
   _mountMatchView({ mode, level, snap = null, mp = null, heroKey = null, matchInbox = null, replay = false }) {
+    this._loadingZoom = false;
+    this._clearMenuBackdrop();
     this.slowFrameT = 0;
     this.autoQualityDropped = false;
     this._wallTiles = null; // wall adjacency cache is per-map
@@ -1982,13 +2120,23 @@ class App {
       }
     } else if (status.enabled) {
       document.querySelector('#friend-party-dialog')?.close();
+      this.ui.root.querySelector('#social-panel')?.close();
+      clearInterval(this._socialTimer);
+      this.lobby?.disconnect?.();
       this.lobby = null;
+      this.ui.lobbyFriends([]); this.ui.socialParty(null);
       this._authenticatedEntryHandled = false;
     }
     this.authStatus = this.auth.status({ error: status.error, reason: status.reason });
     this.ui.setAccount(this.authStatus);
+    // Account presence and incoming invitations exist before opening Social.
+    if (this.authStatus.signedIn && !this.authStatus.needsUsername) void this._openLobby();
     // A shared replay owns the screen. Account hydration above still ran.
     if (this._replayBoot) return;
+    if (this._returnCustom && status.ready && !status.needsUsername) {
+      this._returnCustom = false; sessionStorage.removeItem('zillions-return-custom');
+      this._authenticatedEntryHandled = true; this._openCustomGames(); return;
+    }
     const retry = this._consumeBootRetry(status);
     if (retry) {
       this._authenticatedEntryHandled = true;
@@ -2033,13 +2181,97 @@ class App {
   }
 
   _restartOrReturn() {
-    // Any campaign run that belongs to a character returns to mission
-    // select, not the title screen.
-    if (this.game?.over && this.game.mode === 'campaign' && selectedMmoCharacter(this.profile)) {
-      try { sessionStorage.setItem('zillions-return-to-world', '1'); } catch { /* blocked storage */ }
-      this.ui.shell.finishMission();
+    const game = this.game;
+    if (this.netMode || this.onlineMode || this.lobby?.game) {
+      if (this._customBattle) { try { sessionStorage.setItem('zillions-return-custom','1'); } catch {} }
+      if (!this._customBattle && game?.over && game.mode === 'campaign' && selectedMmoCharacter(this.profile)) {
+        try { sessionStorage.setItem('zillions-return-to-world', '1'); } catch { /* blocked storage */ }
+      }
+      location.reload();
+      return;
     }
-    location.reload();
+    if (game && !game.over) {
+      const diff = game.diffKey || 'normal';
+      const hero = this.ui.selectedHero;
+      const mode = game.mode;
+      const level = game.levelId;
+      this._leaveSoloMatch();
+      this.ui.selectedMode = mode;
+      this.ui.selectedLevel = level;
+      this.startGame(diff, hero);
+      return;
+    }
+    const custom = this._customBattle;
+    const campaign = !custom && !!(game?.over && game.mode === 'campaign' && selectedMmoCharacter(this.profile));
+    this._leaveSoloMatch();
+    if (custom) { this._customBattle = false; this._openCustomGames(); }
+    else if (campaign) this.ui.showOverworld();
+    else {
+      this.ui._playTab = 'campaign';
+      this.ui._showScreen('home');
+    }
+  }
+
+  _enterLeaderWorld() {
+    if (this.game && !this.game.over) return;
+    const character=selectedMmoCharacter(this.profile);
+    if (!character) {this.ui.showCharacterCreator();return;}
+    // World traversal is not built. Enter the truthful campaign surface.
+    this._openOverworld();
+  }
+
+  _openOverworld() {
+    if (this.game && !this.game.over) return;
+    if (this.auth?.isSignedIn() && !selectedMmoCharacter(this.profile)) {
+      this.ui.showCharacterCreator();
+      return;
+    }
+    this.ui._customBattle = false;
+    this.ui.showOverworld();
+  }
+
+  // Solo returns drop the battlefield and rebuild the menu scene in place.
+  // A live room still reloads: WebRTC seats, the lockstep inbox, and the
+  // host's ready barrier are not safe to reconstruct mid-page.
+  _quitToMenu() {
+    if (this.netMode || this.onlineMode || this.lobby?.game) {
+      location.reload();
+      return;
+    }
+    this._leaveSoloMatch();
+    this.ui._playTab = 'campaign';
+    this.ui._showScreen('home');
+  }
+
+  _leaveSoloMatch() {
+    this._loadingZoom = false;
+    this.paused = false;
+    this.missionIntro = null;
+    this.acc = 0;
+    this.replay = null;
+    this._netPumpStop();
+    this._clearWorldMeshes();
+    this._clearNodeMarkers();
+    if (this.terrain) { this.scene.remove(this.terrain); this._disposeObject3D(this.terrain); this.terrain = null; }
+    if (this.fogOfWar) {
+      this.scene.remove(this.fogOfWar.mesh);
+      this.fogOfWar.mesh.geometry.dispose();
+      this.fogOfWar.material.dispose();
+      this.fogOfWar = null;
+    }
+    if (this.corpseMesh) this.corpseMesh.count = 0;
+    this.corpses = this.corpses || [];
+    this.corpses.length = 0;
+    for (const fx of this.blockFx || []) { this.scene.remove(fx.mesh); this._disposeObject3D(fx.mesh); }
+    this.blockFx = [];
+    this.hitFeedback?.clear?.();
+    this.game = null;
+    this.map = null;
+    this.netMode = false;
+    this.mpRole = null;
+    this.ui.hideMatchChrome();
+    this.ui.nav.leaveMatch('home');
+    this.showLoginBackdrop();
   }
 
   _consumeBootRetry(status) {
@@ -2293,16 +2525,18 @@ class App {
     }
   }
 
-  async _createMmoCharacter({ name, appearance, raceKey, customization, quiet = false } = {}) {
+  async _createMmoCharacter({ name, appearance, raceKey, customization, faction, quiet = false } = {}) {
     if (this.game || this._founderCreating) return;
     const clean = String(name || '').trim().slice(0,18);
-    if (!clean) { this.ui.showBanner('Choose a founder name.', 'bad', 2200); return; }
-    if (chapterFounder(this.profile)) { this.ui._showScreen('main'); return; }
+    if (!clean) { this.ui.showBanner('Choose a leader name.', 'bad', 2200); return; }
+    const founder = chapterFounder(this.profile);
+    const identity = chapterIdentity(this.profile.chapter);
+    if (!identity.name) this.profile.chapter = chapterIdentity({ ...faction, name: String(faction?.name || '').trim() || `${clean}'s expedition` });
     this._founderCreating = true;
     const character = makeMmoCharacter(clean, 'vanguard', appearance, raceKey, customization);
     try {
       if (!addMmoCharacter(this.profile, character)) throw new Error('roster_full');
-      this.profile.chapter = chapterIdentity({ ...this.profile.chapter, founderId: character.id });
+      this.profile.chapter = chapterIdentity({ ...this.profile.chapter, founderId: founder?.id || character.id });
       this.profile.lastHero = character.proxyHero;
       this.ui.selectedHero = character.proxyHero;
       this._storeProfileLocally();
@@ -2313,13 +2547,14 @@ class App {
       this.ui.setProfile(this.profile);
       if (!quiet) {
         this.ui._showScreen('main');
-        this.ui.showBanner(`${clean} leads your chapter. Choose the first landing.`, '', 3000);
+        this.ui.showBanner(`${clean} is ready. Enter the world when you are ready.`, '', 3000);
       }
     } catch (err) {
       this.ui.setProfile(this.profile);
       this.ui._showScreen('main');
+      if (err?.message === 'roster_full') {this.ui.showBanner('Your character roster is full.', 'bad', 4000);return;}
       this.ui._showCharacterCreator();
-      this.ui.showBanner('Founder could not sync. Your character is preserved here; save the chapter to retry.', 'bad', 5000);
+      this.ui.showBanner('Character could not sync. Your character is preserved here; save the campaign banner to retry.', 'bad', 5000);
     } finally { this._founderCreating = false; }
   }
 
@@ -2680,7 +2915,7 @@ class App {
   // host frame hitch becomes a stall broadcast to all guests, and stringify +
   // localStorage on the hot path was a guaranteed periodic hitch.
   _autosave(force = false) {
-    if (!this.game || this.replay || this._seedRun || this.game.over || this.game.mode === 'daily' || this.mpRole === 'guest' || this.mpRole === 'spectator') return;
+    if (!this.game || this._customBattle || this.replay || this._seedRun || this.game.over || this.game.mode === 'daily' || this.mpRole === 'guest' || this.mpRole === 'spectator') return;
     if (!force && this.paused) return;
     try {
       const save = { when: Date.now(), snap: this.game.snapshot() };
@@ -2844,6 +3079,13 @@ class App {
 
   _recordGameEnd(won) {
     if (this.mpRole === 'spectator') return;
+    if (this._customBattle) {
+      this._endExtras = { customBattle:true, local:true, grants:[], quests:[] };
+      this._netPumpStop();
+      this.lobby?.setMatchActive(false);
+      if (this.lobby?.game && this.mpRole === 'host') this.lobby.endGame();
+      return;
+    }
     if (this._seedRun) {
       this._seedRun = false;
       this._endExtras = { seedRun: true, local: true };
@@ -3504,6 +3746,7 @@ class App {
     }
     await this._createMmoCharacter({
       name: QUICK_DEFAULTS.founderName,
+      faction: { name: QUICK_DEFAULTS.chapterName, color: QUICK_DEFAULTS.color, emblem: QUICK_DEFAULTS.emblem },
       appearance: QUICK_DEFAULTS.color,
       raceKey: 'human',
       customization: {},
@@ -5082,10 +5325,47 @@ class App {
 
   // ---------------- online lobby ----------------
 
+  async _openSocial() {
+    const generation = this._socialGeneration = (this._socialGeneration || 0) + 1;
+    clearInterval(this._socialTimer);
+    this.keys?.clear(); this.buttonPay = false;
+    for (const id of ['l-friendcode','l-friendadd','m-party']) this.ui.root.querySelector('#'+id).disabled = !this.authStatus?.signedIn;
+    if (!this.authStatus?.signedIn) { this.ui.lobbyFriends([]); this.ui.socialParty(null); this.ui.socialStatus('Sign in through Account to add friends and join parties.'); return; }
+    const refresh = async () => {
+      if (this._socialRefreshing || !this.ui.root.querySelector('#social-panel')?.open) return;
+      this._socialRefreshing = true;
+      try {
+        const lobby = await this._openLobby();
+        if (!lobby?.connected) throw new Error('Friends unavailable. Check your connection and Refresh.');
+        await lobby.loadFriends();
+        const party = await new FriendParty(lobby.sb).refresh();
+        if (!this.authStatus?.signedIn) return;
+        this.ui.socialParty(party);
+        this.ui.socialStatus('Friends stay with your account across characters and games.');
+      } catch (error) { this.ui.socialStatus(error.message || 'Could not load friends. Refresh to retry.'); }
+      finally { this._socialRefreshing = false; }
+    };
+    this.ui.socialStatus('Loading friends and party…');
+    await refresh();
+    if (generation === this._socialGeneration && this.ui.root.querySelector('#social-panel')?.open) this._socialTimer = setInterval(refresh, 15000);
+  }
+
+  async _inviteToParty(userId) {
+    try {
+      if (!this.authStatus?.signedIn) throw new Error('Sign in to invite friends.');
+      const lobby = await this._openLobby();
+      if (!lobby?.connected) throw new Error('Friends unavailable. Refresh to reconnect.');
+      const client = new FriendParty(lobby.sb);
+      const party = await client.refresh() || await client.act('create');
+      await lobby.sendSocialInvite(userId, { fromId:lobby.me.id, fromName:lobby.me.name, partyCode:party.code });
+      this.ui.socialParty(party); this.ui.socialStatus('Party invite sent.');
+    } catch (error) { this.ui.socialStatus(error.message || 'Could not invite your friend.'); }
+  }
+
   async _openFriendParty() {
     try {
       if (!this.authStatus?.signedIn) throw new Error('Sign in to play with friends.');
-      if (!this.profile.mmoCharacters?.length) throw new Error('Create your chapter founder first.');
+
       const lobby=await this._openLobby();
       if (!lobby?.connected) throw new Error('The lobby is unavailable. Retry when your connection recovers.');
       const client=new FriendParty(lobby.sb);
@@ -5113,8 +5393,15 @@ class App {
   }
 
   async _openLobby() {
+    if (this._lobbyOpening) return this._lobbyOpening;
+    this._lobbyOpening = this._connectLobby().finally(() => { this._lobbyOpening = null; });
+    return this._lobbyOpening;
+  }
+
+  async _connectLobby() {
+    if (this.lobby && !this.lobby.connected) { this.lobby.disconnect?.(); this.lobby = null; }
     if (this.lobby) {
-      if (this.lobby.connected) this.lobby.refreshGames();
+      if (this.lobby.connected) this.lobby.refreshGames().catch(() => {});
       return this.lobby;
     }
     this.lobby = new OnlineLobby({
@@ -5130,7 +5417,7 @@ class App {
         if (this.ui._lastScreen === 'custom') this._renderCustomBrowser();
       },
       onOnline: (map) => { this.ui.lobbyOnline(map); this.ui.hubOnline(map ? map.size || Object.keys(map).length : 0); },
-      onFriends: (friends) => this.ui.lobbyFriends(friends),
+      onFriends: (friends) => { if (this.authStatus?.signedIn) this.ui.lobbyFriends(friends); },
       onInvite: (inv) => this.ui.showInviteToast(inv, () => this.acceptInvite(inv)),
       onRoom: (game) => this._onRoomUpdate(game),
       onKnock: (sig) => this._onKnock(sig),
@@ -5146,7 +5433,9 @@ class App {
     this.ui.fillLore(LORE, TIPS);
     this.ui.lobbyStatus('Connecting…');
     try {
-      const me = await this.lobby.connect(this.profile.name || 'Commander', this.auth?.client || null);
+      const connecting = this.lobby;
+      const me = await connecting.connect(this.profile.name || 'Commander', this.auth?.client || null);
+      if (this.lobby !== connecting || !this.authStatus?.signedIn) { connecting.disconnect(); return null; }
       this.ui.lobbySetMe(me);
       this.ui.lobbyChatFill(await this.lobby.loadChat());
       this.ui.lobbyFriends(await this.lobby.loadFriends());
@@ -5160,6 +5449,7 @@ class App {
 
   _onRoomUpdate(game) {
     if (!game) return;
+    this.ui._customBattle = isCustomGame(game);
     const isHost = this.mpRole === 'host';
     const isSpectator = this.mpRole === 'spectator';
     const readiness = roomLaunchReadiness(game, this.peers.length + 1);
@@ -5436,10 +5726,12 @@ class App {
   }
 
   async _addFriend(handle) {
-    if (!this.lobby) return;
+    if (!this.lobby?.connected) { this.ui.socialStatus('Friends unavailable. Refresh to reconnect.'); return; }
     try {
       this.ui.lobbyFriends(await this.lobby.addFriend(handle));
+      this.ui.socialStatus('Friend request sent.');
     } catch (e) {
+      this.ui.socialStatus('Friend request failed: ' + e.message);
       this.ui.showBanner('❌ Friend request failed: ' + e.message, 'bad', 4000);
     }
   }
@@ -5449,6 +5741,7 @@ class App {
     try {
       this.ui.lobbyFriends(await this.lobby.acceptFriend(id));
     } catch (e) {
+      this.ui.socialStatus('Could not accept friend: ' + e.message);
       this.ui.showBanner('❌ Could not accept friend: ' + e.message, 'bad', 4000);
     }
   }
@@ -5458,6 +5751,7 @@ class App {
     try {
       this.ui.lobbyFriends(await this.lobby.removeFriend(id));
     } catch (e) {
+      this.ui.socialStatus('Could not update friend: ' + e.message);
       this.ui.showBanner('❌ Could not update friend: ' + e.message, 'bad', 4000);
     }
   }
@@ -5466,8 +5760,10 @@ class App {
     if (!this.lobby) return;
     try {
       await this.lobby.inviteFriend(userId);
+      this.ui.socialStatus('Lobby invite sent.');
       this.ui.showBanner('⚔️ Invite sent.', '', 2200);
     } catch (e) {
+      this.ui.socialStatus('Lobby invite failed: ' + e.message);
       this.ui.showBanner('❌ Invite failed: ' + e.message, 'bad', 4000);
     }
   }
@@ -5488,9 +5784,10 @@ class App {
 
   playArcadeMap(map) {
     if (!map) return;
+    this.ui._customBattle = true;
     this.ui.selectedMode = map.mode || 'campaign';
     this.ui.selectedLevel = Number(map.level) || 1;
-    this.ui.showSetup({ mode: this.ui.selectedMode });
+    this.ui.showSetup({ mode: this.ui.selectedMode, custom:true, level:Number(map.level)||1 });
     this.ui.setRoomSettings({
       level: this.ui.selectedLevel,
       difficulty: 'normal',
@@ -5499,7 +5796,7 @@ class App {
     });
   }
 
-  async createCustomGame({ name, mapId, mode, mapName, difficulty, maxPlayers } = {}) {
+  async createCustomGame({ name, mapId, mode, mapName, difficulty, maxPlayers, visibility = 'public' } = {}) {
     const lobby = await this._openLobby();
     if (!lobby?.connected) {
       this.ui.showBanner('📡 The lobby is unreachable — Custom Games needs the server.', 'bad', 4500);
@@ -5512,7 +5809,7 @@ class App {
     if (!this._claimRoomLease()) return;
     this.audio.init(); this.mpRole = 'host'; this.onlineMode = true; this.onlinePending = new Map();
     try {
-      const game = await lobby.createGame({ visibility: 'public', level: mapId || 1, mode: mode || 'campaign', difficulty: difficulty || 'normal', unlockedLevel: highestUnlockedLevel(this.profile.campaign), name, maxPlayers, kind: 'custom', mapName });
+      const game = await lobby.createGame({ visibility: visibility === 'private' ? 'private' : 'public', level: mapId || 1, mode: mode || 'campaign', difficulty: difficulty || 'normal', unlockedLevel: highestUnlockedLevel(this.profile.campaign), name, maxPlayers, kind: 'custom', mapName });
       await lobby.updateRoomPlayer({ hero: this.ui.selectedHero }).catch(() => {});
       const room = lobby.game || game;
       this.ui.showSetup({ online: room, mode: room.mode });
@@ -5891,6 +6188,12 @@ class App {
   }
 
   async acceptInvite(inv) {
+    if (inv.partyCode) {
+      if (!/^[A-Z0-9]{10}$/.test(inv.partyCode)) return;
+      sessionStorage.setItem('zillions-party-invite', inv.partyCode);
+      return this._openFriendParty();
+    }
+    this.ui.root.querySelector('#social-panel')?.close();
     const lobby = await this._openLobby();
     const row = await lobby.findByCode(inv.joinCode);
     if (row) this.joinOnlineGame(row);
@@ -7785,6 +8088,7 @@ class App {
   _setupInput() {
     const cv = this.canvas;
     window.addEventListener('keydown', (e) => {
+      if (document.querySelector?.('#social-panel[open], #friend-party-dialog[open]')) return;
       const k = bindKey(e);
       if (e.repeat) {
         const typing = e.target && (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable);
@@ -7817,12 +8121,10 @@ class App {
         this.ui.showCharacterSheet('lattice');
         return;
       }
-      // Dota grammar: Tab opens the hero library from anywhere in the menu.
-      if (!this.game && e.key === 'Tab') {
+      // Menus keep native Tab focus traversal. Character shortcuts remain above.
+      if (!this.game && actionFor(this.binds(), k, 'hub') === 'menu') {
         e.preventDefault();
-        const screen = document.querySelector('#screen-heroes');
-        if (screen && !screen.classList.contains('hidden')) this.ui._showScreen('main');
-        else this.ui._showScreen('heroes');
+        this.ui.back();
         return;
       }
       if (!this.game) return;
@@ -8147,7 +8449,7 @@ class App {
     let dx = 0, dz = 0;
     const binds = this.binds();
     const active = document.activeElement;
-    const editing = !!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable);
+    const editing = !!document.querySelector?.('#social-panel[open], #friend-party-dialog[open]') || (!!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable));
     if (editing) this.keys.clear();
     if (isHeld(binds, this.keys, 'move_up')) dz -= 1;
     if (isHeld(binds, this.keys, 'move_down')) dz += 1;
@@ -8374,7 +8676,7 @@ class App {
     let dz = 0;
     const binds = this.binds();
     const active = document.activeElement;
-    const editing = !!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable);
+    const editing = !!document.querySelector?.('#social-panel[open], #friend-party-dialog[open]') || (!!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable));
     if (!editing) {
       if (isHeld(binds, this.keys, 'move_up')) dz -= 1;
       if (isHeld(binds, this.keys, 'move_down')) dz += 1;
@@ -8410,7 +8712,7 @@ class App {
     const feel = this.feel();
     const binds = this.binds();
     const active = document.activeElement;
-    const editing = !!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable);
+    const editing = !!document.querySelector?.('#social-panel[open], #friend-party-dialog[open]') || (!!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable));
     let panX = 0, panZ = 0;
     if (!this.replay && !editing && !this.paused && !this._presentHold) {
       const held = (axis, action) => cameraAxisHeld(binds, this.keys, axis, {
@@ -9207,6 +9509,7 @@ class App {
     if (!this.game && this.titleSpace) {
       this._updateTitleSpace(t);
     }
+    if (!this.game) this.ui.pollMenuPad();
 
     if(!this.game&&this._builderMesh)this._builderMesh.visible=false;
     if (this.game) {

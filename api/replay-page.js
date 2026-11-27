@@ -43,6 +43,7 @@ function page({ status = 200, title, description, url, replayId }) {
   <meta name="twitter:description" content="${safeDescription}">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧟</text></svg>">
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/shell.css">
   <script type="importmap">
     { "imports": { "three": "/vendor/three.module.js", "three/addons/": "/vendor/jsm/" } }
   </script>

@@ -4,7 +4,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const ui = readFileSync(new URL('../src/ui.js', import.meta.url), 'utf8');
+const ui = readFileSync(new URL('../src/ui.js', import.meta.url), 'utf8')
+  + readFileSync(new URL('../src/shell-markup.js', import.meta.url), 'utf8');
 const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
 const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
 

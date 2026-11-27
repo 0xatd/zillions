@@ -124,7 +124,7 @@ try {
     await app._saveChapter({name:'Journey Chapter',color:'cobalt',emblem:'star'});
     const founderScreen = !document.querySelector('#screen-character-create').classList.contains('hidden');
     document.querySelector('#creator-cancel').click();
-    const canResumeFounder = [...document.querySelectorAll('#character-list button')].some(b=>b.textContent==='CREATE YOUR FOUNDER');
+    const canResumeFounder = !document.querySelector('#m-create-character').disabled;
     app.ui.showCharacterCreator();
     await app._createMmoCharacter({name:'Journey Test',appearance:'iron',raceKey:'human'});
     const selected = !document.querySelector('#screen-main').classList.contains('hidden');
@@ -228,8 +228,8 @@ try {
   for (const [width, height] of [[390, 844], [844, 390], [1200, 655]]) {
     await command('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
     assert.equal(await evaluate(`(() => {
-      window.__app.ui._showScreen('main');
-      const screen = document.querySelector('#screen-main');
+      window.__app.ui.showOverworld();
+      const screen = document.querySelector('#screen-overworld');
       screen.scrollTop = 0;
       return ['#chapter-map', '#chapter-next'].every(selector => {
         const button = document.querySelector(selector), r = button.getBoundingClientRect();
@@ -305,8 +305,9 @@ try {
       proxyHero: 'scott', canvasId: 'creator-preview-canvas' });
     const model = window.__app.characterPreviews.get('creator-preview-canvas').model;
     let meshes = 0, triangles = 0;
-    model.traverse((node) => {
-      if (!node.isMesh || !node.visible) return;
+    // Hidden parent groups hide their descendants too. Count rendered meshes.
+    model.traverseVisible((node) => {
+      if (!node.isMesh) return;
       meshes++;
       triangles += (node.geometry.index ? node.geometry.index.count : node.geometry.attributes.position.count) / 3;
     });
