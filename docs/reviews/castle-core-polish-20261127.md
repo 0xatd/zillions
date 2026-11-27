@@ -46,3 +46,7 @@ No merge, production deployment, or completion claim.
 - `git diff --check`: passed.
 - Rendered local relay: full check passed with WebRTC blocked and8% injected packet loss. Two-minute4×CPU-throttle phase: maximum sampled stall307ms, resync0ms. Guest reload recovered64.584s after page load, frame gap44; host refresh closed the stale invite. Slow software-rendered recovery remains a usability caveat, not a hardware benchmark.
 - Full `npm run check`: passed, all script checks and337tests, zero failures.
+
+## Custom-only scope follow-up
+
+World entry is gray/disabled, including the preserved runtime entry guard. Custom Games opens the existing map catalog without character creation. Laptop and phone browser clicks/screenshots pass (`scripts/custom-only-browser-check.mjs`); local production build and full `npm run check` pass (337 tests). World/progression code remains preserved. No merge or deployment.
