@@ -117,6 +117,9 @@ procedural renderer and must not stop a match from starting.
 `src/asset-base.js` is the one GLB host. The default is the public R2 bucket
 `zillions-assets` at `https://pub-cf11595eb9c04887b6187ec78f8dcbd5.r2.dev`.
 Request paths stay the repo-relative paths (`assets/art-marines/hero_sniper.glb`).
+Remote URLs add `?v=` from `GLB_ASSET_VERSION`. Object keys stay stable and
+the one-year cache header stays. Bump the version when replaced bytes must
+reach players who already cached the previous URL.
 Override that host with `?assetBase=`, `window.ZILLIONS_ASSET_BASE`, the
 `zillions-asset-base` meta tag, or `ZILLIONS_ASSET_BASE` under Node. An empty
 `?assetBase=` uses this origin only. A failed response or a body that is not a

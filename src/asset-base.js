@@ -14,6 +14,10 @@ export const R2_BUCKET = 'zillions-assets';
 export const DEFAULT_ASSET_BASE_URL = 'https://pub-cf11595eb9c04887b6187ec78f8dcbd5.r2.dev';
 export const GLB_CONTENT_TYPE = 'model/gltf-binary';
 export const GLB_CACHE_CONTROL = 'public, max-age=31536000';
+// Bump this in the same deploy that replaces bytes already stored under a
+// stable R2 key. Remote URLs include ?v=, so a one-year browser cache of the
+// previous URL is left unused. Object keys stay the repo paths.
+export const GLB_ASSET_VERSION = '1';
 
 // A hero GLB is about 10 MB. Allow the public host to finish before the
 // same-origin file is tried. A connection failure skips the host for the
@@ -119,8 +123,21 @@ export function currentAssetBase() {
   });
 }
 
+// The version is part of the remote cache key only. Local fallback paths stay
+// bare so the same-origin file still exists at the repo path.
+export function withAssetVersion(url, version = GLB_ASSET_VERSION) {
+  const token = String(version ?? '').trim();
+  if (!token) return url;
+  const hash = url.indexOf('#');
+  const bare = hash >= 0 ? url.slice(0, hash) : url;
+  const fragment = hash >= 0 ? url.slice(hash) : '';
+  if (/[?&]v=/.test(bare)) return url;
+  const join = bare.includes('?') ? '&' : '?';
+  return `${bare}${join}v=${encodeURIComponent(token)}${fragment}`;
+}
+
 // Repo-relative paths stay repo-relative (`assets/art-marines/hero_sniper.glb`).
-// An absolute URL is returned unchanged. A base produces [remote, local].
+// An absolute URL is returned unchanged. A base produces [versioned remote, local].
 export function glbCandidateUrls(relativeUrl, base = DEFAULT_ASSET_BASE_URL) {
   const raw = String(relativeUrl ?? '').trim();
   if (!raw) return [];
@@ -128,8 +145,19 @@ export function glbCandidateUrls(relativeUrl, base = DEFAULT_ASSET_BASE_URL) {
   const rel = raw.replace(/^\/+/, '');
   const normalized = base ? parseAssetBase(base) : '';
   if (!normalized) return [rel];
-  const remote = `${normalized}/${rel}`;
+  const remote = withAssetVersion(joinAssetPath(normalized, rel));
   return remote === rel ? [rel] : [remote, rel];
+}
+
+// Keep a path prefix and an existing query. `new URL(rel, base)` would drop
+// a prefix that does not end in a slash.
+function joinAssetPath(base, rel) {
+  const root = new URL(base);
+  const search = root.search;
+  if (!root.pathname.endsWith('/')) root.pathname = `${root.pathname}/`;
+  // A path-relative URL drops the base query. Keep it, then add ?v= beside it.
+  const joined = new URL(rel, root);
+  return `${joined.origin}${joined.pathname}${search}`;
 }
 
 export function glbResourcePath(url) {

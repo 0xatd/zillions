@@ -425,7 +425,12 @@ The default host is the public bucket `zillions-assets`:
 `https://pub-cf11595eb9c04887b6187ec78f8dcbd5.r2.dev`
 
 Paths stay the repo paths, for example
-`assets/art-marines/hero_sniper.glb`. `assets.taborlin.co` is the planned
+`assets/art-marines/hero_sniper.glb`. Remote requests add `?v=` from
+`GLB_ASSET_VERSION` in `src/asset-base.js`. The stored object key does not
+include that query. Responses stay cached for one year, so bump
+`GLB_ASSET_VERSION` in the same deploy that replaces bytes already in the
+bucket. Players then request a new URL. The same-origin fallback stays
+unversioned. `assets.taborlin.co` is the planned
 custom domain and is not attached yet. Change the host in any of these ways,
 highest priority first:
 

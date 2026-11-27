@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { isGlbBytes } from '../src/marine-hero-art.js';
 import {
   DEFAULT_ASSET_BASE_URL,
+  GLB_ASSET_VERSION,
   GLB_CACHE_CONTROL,
   GLB_CONTENT_TYPE,
   R2_BUCKET,
@@ -17,7 +18,7 @@ import {
 import { assetObjectKey, isUploadableGlb, wranglerPutArgs } from '../scripts/upload-assets-r2.mjs';
 
 const REL = 'assets/art-marines/hero_sniper.glb';
-const REMOTE = `${DEFAULT_ASSET_BASE_URL}/${REL}`;
+const REMOTE = `${DEFAULT_ASSET_BASE_URL}/${REL}?v=${encodeURIComponent(GLB_ASSET_VERSION)}`;
 const GLB_HEADER = new Uint8Array([0x67, 0x6c, 0x54, 0x46, 2, 0, 0, 0, 12, 0, 0, 0]);
 const POINTER = 'version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 12\n';
 
@@ -30,9 +31,16 @@ function responseFor(body, { ok = true, status = 200 } = {}) {
 test('the default asset base is the public R2 URL and keeps repo-relative paths', () => {
   assert.equal(DEFAULT_ASSET_BASE_URL, 'https://pub-cf11595eb9c04887b6187ec78f8dcbd5.r2.dev');
   assert.equal(resolveAssetBase(), DEFAULT_ASSET_BASE_URL);
+  assert.ok(GLB_ASSET_VERSION);
   assert.deepEqual(glbCandidateUrls(REL), [REMOTE, REL]);
+  assert.equal(REMOTE.includes('?v='), true);
+  assert.equal(REL.includes('?'), false);
   assert.deepEqual(glbCandidateUrls(REL, 'https://assets.taborlin.co/'), [
-    'https://assets.taborlin.co/assets/art-marines/hero_sniper.glb',
+    `https://assets.taborlin.co/${REL}?v=${encodeURIComponent(GLB_ASSET_VERSION)}`,
+    REL,
+  ]);
+  assert.deepEqual(glbCandidateUrls(REL, 'https://cdn.example/zillions?x=1'), [
+    `https://cdn.example/zillions/${REL}?x=1&v=${encodeURIComponent(GLB_ASSET_VERSION)}`,
     REL,
   ]);
   assert.deepEqual(glbCandidateUrls(REL, ''), [REL]);
@@ -170,7 +178,7 @@ test('a network failure on the default host skips later remote fetches', async (
     await fetchGlbBytes('assets/a.glb', { fetchImpl, timeoutMs: 0 });
     await fetchGlbBytes('assets/b.glb', { fetchImpl, timeoutMs: 0 });
     assert.deepEqual(seen, [
-      `${DEFAULT_ASSET_BASE_URL}/assets/a.glb`,
+      `${DEFAULT_ASSET_BASE_URL}/assets/a.glb?v=${encodeURIComponent(GLB_ASSET_VERSION)}`,
       'assets/a.glb',
       'assets/b.glb',
     ]);
@@ -194,6 +202,7 @@ test('runtime GLB loaders share the asset base, and the uploader only puts objec
   }
   assert.match(assets, /marineHeroLoadUrls/);
   assert.equal(GLB_CACHE_CONTROL, 'public, max-age=31536000');
+  assert.match(script, /GLB_ASSET_VERSION/);
   assert.equal(GLB_CONTENT_TYPE, 'model/gltf-binary');
   assert.equal(R2_BUCKET, 'zillions-assets');
   assert.match(script, /GLB_CACHE_CONTROL/);
@@ -206,6 +215,7 @@ test('runtime GLB loaders share the asset base, and the uploader only puts objec
     '--cache-control=public, max-age=31536000',
     '--remote',
   ]);
+  assert.equal(put.some((arg) => arg.includes('?v=')), false);
   assert.equal(assetObjectKey('/repo', '/repo/assets/kit/european/castle_t1.glb'), 'assets/kit/european/castle_t1.glb');
   assert.equal(assetObjectKey('/repo', '/repo/secrets.env'), null);
   assert.equal(isUploadableGlb(GLB_HEADER), true);

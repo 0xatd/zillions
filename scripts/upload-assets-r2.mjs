@@ -12,7 +12,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { isGlbBytes } from '../src/marine-hero-art.js';
-import { GLB_CACHE_CONTROL, GLB_CONTENT_TYPE, R2_BUCKET } from '../src/asset-base.js';
+import { GLB_ASSET_VERSION, GLB_CACHE_CONTROL, GLB_CONTENT_TYPE, R2_BUCKET } from '../src/asset-base.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -107,12 +107,15 @@ function main() {
     console.log('Usage: node scripts/upload-assets-r2.mjs [--dry-run]');
     console.log(`Puts assets/**/*.glb into R2 bucket ${R2_BUCKET}.`);
     console.log(`Cache-Control: ${GLB_CACHE_CONTROL}`);
-    console.log('Does not delete objects.');
+    console.log(`Runtime cache key: ?v=${GLB_ASSET_VERSION}`);
+    console.log('Does not delete objects. Bump GLB_ASSET_VERSION when replacing bytes.');
     return;
   }
   const { upload, skip } = classifyAssetGlbs(ROOT);
   for (const item of skip) console.warn(`skip ${item.key || item.file}: ${item.reason}`);
   console.log(`${upload.length} GLB file(s) to upload, ${skip.length} skipped.`);
+  console.log(`Object keys stay the repo paths. Clients request ?v=${GLB_ASSET_VERSION}.`);
+  console.log('Bump GLB_ASSET_VERSION in src/asset-base.js when these bytes should replace a year-long cache.');
   if (dryRun) {
     for (const item of upload) console.log(`dry-run ${item.key} (${item.bytes} bytes)`);
     return;
