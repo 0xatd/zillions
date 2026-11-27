@@ -76,7 +76,7 @@ test('the mode registry covers the play tabs and marks unbuilt modes', () => {
   for (const tab of ['campaign', 'coop', 'versus', 'custom']) {
     assert.ok(modesForTab(tab).length >= 1, tab);
   }
-  assert.equal(modeById('campaign').status, 'built');
+  assert.equal(modeById('campaign').status, 'paused');
   assert.equal(modeById('survival').buttonId, 'solo-survival');
   assert.equal(modeById('ranked').status, 'coming-soon');
   assert.equal(modeById('ranked').ranked, true);
