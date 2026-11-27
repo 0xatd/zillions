@@ -12,6 +12,7 @@ import { EQUIP_SLOTS, MOD_KEYS, hashString } from './items.js';
 
 export function stateHash(g) {
   let h = 7;
+  if (g.ironRain) h = (h * 31 + hashString(JSON.stringify([Math.round(g.ironRain.prep * 1000), g.ironRain.commanderReleased]))) | 0;
   h = (h * 31 + hashString(g.stance || '')) | 0;
   if (g.worldArmy?.length) h = (h*31 + hashString(JSON.stringify([g.worldArmy,g.expeditionLosses,g.worldArmyDeployed])))|0;
   if (g.armyRally) h = (h * 31 + hashString(JSON.stringify(g.armyRally))) | 0;

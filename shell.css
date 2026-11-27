@@ -490,7 +490,8 @@ button:disabled {cursor:not-allowed;}
 #social-panel #m-party {margin-top:12px;}
 #social-panel .mphint {line-height:1.5;}
 #cu-create-panel {max-height:calc(100dvh - 100px);overflow:auto;}
-#screen-custom .custom-map-preview canvas {width:100%;height:180px;object-fit:contain;}
+#screen-custom .custom-map-preview {overflow:hidden;}
+#screen-custom .custom-map-preview canvas {width:100%;height:100%;min-height:0;object-fit:contain;}
 #social-panel .friendactions .tbtn {width:auto;height:auto;min-width:34px;white-space:nowrap;font-size:12px;padding:6px 8px;}
 #social-panel .friendmeta {flex:1 1 100%;margin-bottom:8px;}
 #social-panel .friendactions {width:100%;justify-content:flex-start;}

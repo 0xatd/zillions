@@ -7,7 +7,7 @@ export function combatAlert(game, player = 0) {
   const keepHealth = keep && n(keep.maxHp) > 0 ? n(keep.hp) / n(keep.maxHp) : null;
   const heroHealth = hero && !hero.dead && n(hero.maxHp) > 0 ? n(hero.hp) / n(hero.maxHp) : null;
   if (keepHealth != null && keepHealth <= 0.35) return { key: 'keep-critical', tone: 'critical', icon: '🏰', title: 'KEEP CRITICAL', detail: 'Return to the city. Set the army to Defend and repair the inner line.' };
-  if (game.finalStand && game.boss && !game.boss.dead) return { key: game.boss.enraged ? 'boss-enraged' : 'boss-walking', tone: 'boss', icon: '☠️', title: game.boss.enraged ? 'BOSS ENRAGED' : 'CHAMPION AT LARGE', detail: game.boss.enraged ? 'Break contact if needed; focus the champion before it reaches the Keep.' : 'Regroup at the city and focus the marked champion.' };
+  if ((game.finalStand || game.ironRain) && game.boss && !game.boss.dead) return { key: game.boss.enraged ? 'boss-enraged' : 'boss-walking', tone: 'boss', icon: '☠️', title: game.boss.enraged ? 'BOSS ENRAGED' : 'CHAMPION AT LARGE', detail: game.boss.enraged ? 'Break contact if needed; focus the champion before it reaches the Keep.' : 'Regroup at the city and focus the marked champion.' };
   if (heroHealth != null && heroHealth <= 0.25) return { key: 'hero-critical', tone: 'warning', icon: '❤️', title: 'HERO WOUNDED', detail: 'Disengage, dodge, and let regeneration work before re-entering the horde.' };
   if (keepHealth != null && keepHealth <= 0.75) return { key: 'keep-damaged', tone: 'warning', icon: '🏰', title: 'KEEP UNDER PRESSURE', detail: 'Check the city line now. Siegers can bypass your army.' };
   return null;
@@ -22,9 +22,9 @@ export function runReview({ won = false, stats = {}, threat = 0, mode = 'campaig
     const cause = safe.lost === 0
       ? { icon: '🛡️', title: 'Your defensive line held', detail: `${safe.built} structures raised with none lost.` }
       : safe.nests > 0
-        ? { icon: '🔥', title: 'You kept pressure on the hives', detail: `${safe.nests} nests razed before the final counterattack.` }
+        ? { icon: '🔥', title: 'You kept pressure on the hives', detail: game?.ironRain ? `${safe.nests} enemy bases destroyed.` : `${safe.nests} nests razed before the final counterattack.` }
         : { icon: '⚔️', title: 'You survived the final pressure', detail: `${safe.kills} enemies slain through Threat ${n(threat)}.` };
-    return { cause, action: mode === 'campaign' ? 'Review the new rewards, then prepare for the next front.' : 'Continue while this loadout is working.' };
+    return { cause, action: game?.ironRain ? 'Choose another map or try a different opening.' : mode === 'campaign' ? 'Review the new rewards, then prepare for the next front.' : 'Continue while this loadout is working.' };
   }
   if (game?.defeatCause === 'party_exhausted') return {
     cause: { icon: '❤️', title: 'The company ran out of lives', detail: `${safe.heroDeaths} hero ${safe.heroDeaths === 1 ? 'fall' : 'falls'} exhausted the shared life pool.` },

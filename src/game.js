@@ -84,8 +84,9 @@ function segOpen(x0, z0, x1, z1, pass) {
 
 // v12: colony crew, corrected escort routing and committed combat windups.
 // v14: timed hero attacks and released damage; older readers must not drop them.
-export const SNAPSHOT_VERSION = 15;
-export const isCompatibleSnapshot = snap => snap?.v === SNAPSHOT_VERSION || snap?.v === 14 || snap?.v === 13 || snap?.v === 12;
+// v16: retain Iron Rain preparation and one-time commander deployment.
+export const SNAPSHOT_VERSION = 16;
+export const isCompatibleSnapshot = snap => snap?.v === SNAPSHOT_VERSION || snap?.v === 15 || snap?.v === 14 || snap?.v === 13 || snap?.v === 12;
 
 export class Game {
   // heroKeys: a hero key string (solo) or an array of keys (co-op, one per player).
@@ -163,6 +164,11 @@ export class Game {
     this.worldArmy = Array.isArray(opts.worldArmy) ? opts.worldArmy.slice(0,4).map(n=>Math.max(0,Math.min(40,Math.floor(Number(n)||0)))) : [];
     this.expeditionLosses = this.worldArmy.map(()=>0);
     this.worldArmyDeployed = false;
+    // Iron Rain is the standalone build/defend/conquer style. Expedition armies
+    // and other custom modes keep their existing rules. Older saves opt out.
+    this.ironRain = this.mode === 'campaign' && !this.worldArmy.length
+      ? { prep: this.levelId === 1 ? 0 : ({casual:45, normal:30, brutal:20}[difficulty] ?? 30), commanderReleased: false }
+      : null;
     this.stance = 'defend';      // army stance: defend | guard | attack (no micro)
     this.time = 0;
     this.threat = 0;             // the clock that replaced nightfall
@@ -287,6 +293,7 @@ export class Game {
       stance: this.stance,
       worldArmy: [...this.worldArmy], expeditionLosses:[...this.expeditionLosses], worldArmyDeployed:this.worldArmyDeployed,
       armyRally: this.armyRally ? {...this.armyRally} : null,
+      ironRain: this.ironRain ? { ...this.ironRain, prep: snapNum(this.ironRain.prep) } : null,
       builders: this.builders ? JSON.parse(JSON.stringify(this.builders)) : null,
       firstSiege: this.firstSiege ? {
         stage: this.firstSiege.stage, nestId: this.firstSiege.nestId,
@@ -434,6 +441,7 @@ export class Game {
     this.threatLevel = snap.threatLevel || 1;
     this.phase = snap.phase === 'found' ? 'found' : 'live';
     this.finalStand = !!snap.finalStand;
+    this.ironRain = snap.ironRain ? { ...snap.ironRain } : null;
     this.gold = snap.gold;
     this.site = snap.site ?? -1;
     this.stance = snap.stance || 'defend';
@@ -963,7 +971,7 @@ export class Game {
       const closest = live.sort((a, b) => dist2(a.x, a.z, site.x, site.z) - dist2(b.x, b.z, site.x, site.z))[0];
       this.firstSiege.nestId = closest?.id ?? null;
       for (const nest of live) {
-        nest.musterT = nest === closest ? 10 : Math.max(nest.musterT, 38 + nest.id * 3);
+        nest.musterT = nest === closest ? (this.ironRain ? ({casual:15, normal:10, brutal:7}[this.diffKey] ?? 10) : 10) : Math.max(nest.musterT, 38 + nest.id * 3);
         if (this.dailyMods?.has('eager_nests')) nest.musterT *= 0.8;
       }
     }
@@ -1889,19 +1897,25 @@ export class Game {
   _updateSiege(dt) {
     if (this.phase !== 'live' || this.over) return;
 
+    // Preparation pauses reinforcements and escalation, not construction or
+    // contested ground. Only time beyond the countdown advances enemy timers.
+    const preparing = Math.min(dt, this.ironRain?.prep || 0);
+    if (this.ironRain) this.ironRain.prep = Math.max(0, this.ironRain.prep - dt);
+    const pressureDt = dt - preparing;
+
     // Threat: the clock the player can blame themselves for.
     const before = this.threatLevel;
     // Nest count is capped for the clock: a five-hive map should mean MORE
     // sieges, not a faster clock on top of more sieges. Razing below three
     // still visibly slows it, which is the reward for pushing.
-    if (!this.firstSiegeRelief()) this.threat = Math.min(THREAT.max, this.threat
-      + (THREAT.perSecond + THREAT.perNest * Math.min(3, this.liveNests())) * dt * threatClockMult(this.diff.mult));
+    if (pressureDt > 0 && !this.firstSiegeRelief()) this.threat = Math.min(THREAT.max, this.threat
+      + (THREAT.perSecond + THREAT.perNest * Math.min(3, this.liveNests())) * pressureDt * threatClockMult(this.diff.mult));
     this.threatLevel = Math.max(1, Math.floor(this.threat) + 1);
     if (this.threatLevel > before) this._surge();
 
     this._updateIncome(dt);
     this._updateScouting();
-    this._updateHives(dt);
+    if (pressureDt > 0) this._updateHives(pressureDt);
     this._updateNodeBlight(dt);
     this._updateNodes(dt);
     if (this.mode === 'labyrinth') this._updateLabyrinthEncounters(dt);
@@ -1910,7 +1924,9 @@ export class Game {
     // Campaign: raze every hive and the survivors call one last counterattack.
     if (this.mode !== 'daily' && !this.finalStand && this.nests.length && !this.liveNests()) {
       this.finalStand = true;
-      if (this.mode === 'labyrinth') {
+      if (this.ironRain) {
+        this.msg('All enemy bases destroyed. Defeat their remaining commander to secure the field.', 'info');
+      } else if (this.mode === 'labyrinth') {
         // No Keep to hold. The champion rises from the deepest razed chamber
         // with its last brood — kill it and the trial is cleared.
         const last = this._deepestChamber();
@@ -1928,6 +1944,7 @@ export class Game {
         this._edgeAssault(count);
       }
     }
+    if (this.ironRain && this.finalStand && !this.boss) this._gameOver(true);
   }
 
   _updateLabyrinthEncounters(dt) {
@@ -2132,7 +2149,8 @@ export class Game {
     for (const b of this.buildings) if (b.alive && b.def.income) rate += b.def.income;
     rate *= this.economy.income * (1 + this.relicMods.income);
     for (const n of this.nodes) {
-      if (!n.offMap && n.owner === 'player') rate += SIEGE.nodeIncome * (n.def.income || 1);
+      const supplied = !this.ironRain || this.buildings.some(b => b.alive && b.kind === 'outpost' && b.plotId === OUTPOST_PLOT_BASE + n.id);
+      if (!n.offMap && n.owner === 'player' && supplied) rate += SIEGE.nodeIncome * (n.def.income || 1);
     }
     rate /= SIEGE.incomePeriod;
     this.incomeRate = rate;
@@ -2201,13 +2219,14 @@ export class Game {
   }
 
   _hiveMuster(nest, mult, firstSiege = false) {
+    if (!nest.alive || nest.offMap) return;
     const coopMult = 1 + 0.4 * (this.heroKeys.length - 1);
     const share = 3 / Math.max(3, this.nests.length);
     const w = hiveSquad(this.threat, hordeCountMult(this.diff.mult) * this.level.mult * this.economy.pressure * coopMult * mult * share, this._mixThreat());
     // Ground the hive holds is where part of its muster ACTUALLY appears. This
     // moves pressure closer to you without adding any more of it — so taking a
     // hive-held node is worth doing for position, not just for income.
-    const staging = this.nodes.filter((n) => !n.offMap && n.owner === 'hive');
+    const staging = this.ironRain ? [] : this.nodes.filter((n) => !n.offMap && n.owner === 'hive');
     let fromNest = w.size;
     let spawned = 0;
     if (staging.length && !firstSiege) {
@@ -2320,7 +2339,7 @@ export class Game {
         const a = (i / 4) * Math.PI * 2;
         this._spawnCoin(node.x + Math.cos(a) * 1.6, node.z + Math.sin(a) * 1.6, Math.ceil(DROPS.nodeCoins / 4), node.x, node.z);
       }
-      this.msg(`🚩 ${node.name} is yours. It pays, it spawns, and you can raise a Forward Camp on it.`, 'info');
+      this.msg(this.ironRain ? `🚩 ${node.name} secured. Build and defend a Forward Camp to earn its income and reinforce here.` : `🚩 ${node.name} is yours. It pays, it spawns, and you can raise a Forward Camp on it.`, 'info');
       this.emit({ type: 'nodetaken', x: node.x, z: node.z, id: node.id });
     } else {
       // Losing a node also ruins the whole fort you built on it.
@@ -3454,7 +3473,7 @@ export class Game {
       cancelHeroAttack(h);
       h.orderX = null; h.orderZ = null; h.orderKind = null; h.orderId = null;
       if (h.fallen) return; // out of lives — this fall is final
-      h.reviveT -= dt;
+      h.reviveT = Math.max(0, h.reviveT - dt);
       if (h.reviveT <= 0) {
         h.dead = false;
         h.hp = h.maxHp;
@@ -5187,11 +5206,16 @@ export class Game {
         return;
       }
     }
+    // The final commander deploys from a still-living base, never its ruins.
+    if (this.ironRain && !this.ironRain.commanderReleased && this.liveNests() === 1) {
+      this.ironRain.commanderReleased = true;
+      this._spawnBoss(n.id);
+    }
     n.hp -= dmg;
     this.emit({ type: 'bhit', x: n.x, z: n.z });
     // A hive under the knife spits defenders. Razing one is a siege you have
     // to commit to, not a speed bump you walk over.
-    if ((n.defendT || 0) <= this.time) {
+    if ((n.defendT || 0) <= this.time && (!this.ironRain || n.hp > 0)) {
       n.defendT = this.time + 9;
       const w = hiveSquad(this.threat, hordeCountMult(this.diff.mult) * this.level.mult, this._mixThreat());
       this._spawnHorde(Math.max(4, Math.round(w.size * 0.8)), [n.id], w.types);
@@ -5201,7 +5225,7 @@ export class Game {
       n.alive = false;
       n.hp = 0;
       this.stats.nests++;
-      this.threat = Math.min(THREAT.max, this.threat + THREAT.perNestRazed);
+      if (!this.ironRain) this.threat = Math.min(THREAT.max, this.threat + THREAT.perNestRazed);
       // Razing a hive pays: a fountain of gold from the corpse-hoard.
       for (let i = 0; i < 6; i++) {
         const a = (i / 6) * Math.PI * 2;

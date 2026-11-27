@@ -605,7 +605,7 @@ export class UI {
     if (!seg.dataset.init) {
       seg.dataset.init = '1';
       seg.innerHTML = [
-        ['campaign', '⚔️ Campaign'], ['survival', '💀 Survival'], ['labyrinth', '🌀 Labyrinth'],
+        ['campaign', '⚔️ Iron Rain'], ['survival', '💀 Survival'], ['labyrinth', '🌀 Labyrinth'],
       ].map(([key, label]) => `<button class="tbtn modechip" data-mode="${key}">${label}</button>`).join('');
       for (const chip of seg.querySelectorAll('.modechip')) {
         chip.onclick = () => this.cb.onModePick && this.cb.onModePick(chip.dataset.mode);
@@ -906,13 +906,13 @@ export class UI {
       for (const map of maps) {
         const row = document.createElement('button');
         row.className = `custom-map-row${this._selectedArcadeMap?.id === map.id ? ' selected' : ''}`;
-        row.innerHTML = `<span class="custom-map-icon">${map.icon}</span><span><b>${escapeHtml(map.name)}</b><small>${map.mode === 'campaign' ? 'SIEGE' : map.mode.toUpperCase()} · BY ${map.author.toUpperCase()}</small></span><span>${map.players}</span><span>PREBUILT</span>`;
+        row.innerHTML = `<span class="custom-map-icon">${map.icon}</span><span><b>${escapeHtml(map.name)}</b><small>${map.mode === 'campaign' ? 'IRON RAIN' : map.mode.toUpperCase()} · BY ${map.author.toUpperCase()}</small></span><span>${map.players}</span><span>PREBUILT</span>`;
         row.onclick = () => { this._selectedArcadeMap = map; this._selectedCustomGame = null; this._renderCustomRows(); };
         box.appendChild(row);
       }
       const map = this._selectedArcadeMap;
       detail.innerHTML = map
-        ? `<span class="modeeyebrow">ARCADE MAP</span><div class="custom-map-preview">${map.icon}</div><h2>${escapeHtml(map.name)}</h2><p>${escapeHtml(map.description)}</p><dl><div><dt>MODE</dt><dd>${map.mode === 'campaign' ? 'SIEGE' : map.mode.toUpperCase()}</dd></div><div><dt>PLAYERS</dt><dd>${map.players}</dd></div><div><dt>DIFFICULTY</dt><dd>${map.difficulty}</dd></div><div><dt>AUTHOR</dt><dd>${map.author}</dd></div></dl>`
+        ? `<span class="modeeyebrow">ARCADE MAP</span><div class="custom-map-preview">${map.icon}</div><h2>${escapeHtml(map.name)}</h2><p>${escapeHtml(map.description)}</p><dl><div><dt>MODE</dt><dd>${map.mode === 'campaign' ? 'IRON RAIN' : map.mode.toUpperCase()}</dd></div><div><dt>PLAYERS</dt><dd>${map.players}</dd></div><div><dt>DIFFICULTY</dt><dd>${map.difficulty}</dd></div><div><dt>AUTHOR</dt><dd>${map.author}</dd></div></dl>`
         : '<span class="modeeyebrow">ARCADE</span><h2>CHOOSE A MAP</h2><p>Browse Zillions maps, then play immediately or host a lobby.</p>';
       if (map) this._customMapPreview(map.level);
       join.textContent = 'PLAY NOW';
@@ -939,7 +939,7 @@ export class UI {
       row.className = `custom-live-row${this._selectedCustomGame?.id === game.id ? ' selected' : ''}`;
       row.disabled = incompatible;
       const setup = publicRoomSetup(game);
-      row.innerHTML = `<span><b>${escapeHtml(game.name || `${game.host_name}'s game`)}</b><small>HOST @${escapeHtml(game.host_name || 'unknown')}</small></span><span>${escapeHtml(setup.mapName || levelById(setup.level)?.name || 'Unknown map')}<small>${String(setup.mode || 'campaign').toUpperCase()} · ${(DIFFICULTY[setup.difficulty] || DIFFICULTY.normal).label}</small></span><span>${game.players || 1}/${game.max_players || 4}</span><span class="custom-status ${game.status === 'open' ? 'open' : 'playing'}">${incompatible ? 'UPDATE' : game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</span>`;
+      row.innerHTML = `<span><b>${escapeHtml(game.name || `${game.host_name}'s game`)}</b><small>HOST @${escapeHtml(game.host_name || 'unknown')}</small></span><span>${escapeHtml(setup.mapName || levelById(setup.level)?.name || 'Unknown map')}<small>${(setup.mode || 'campaign') === 'campaign' ? 'IRON RAIN' : String(setup.mode).toUpperCase()} · ${(DIFFICULTY[setup.difficulty] || DIFFICULTY.normal).label}</small></span><span>${game.players || 1}/${game.max_players || 4}</span><span class="custom-status ${game.status === 'open' ? 'open' : 'playing'}">${incompatible ? 'UPDATE' : game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</span>`;
       row.onclick = () => { this._selectedCustomGame = game; this._selectedArcadeMap = null; this._renderCustomRows(); };
       box.appendChild(row);
     }
@@ -2392,7 +2392,7 @@ export class UI {
       : coop ? 'Party battle — one hero each'
       : mode === 'survival' ? '💀 Survival — how high can you drive the Threat?'
       : mode === 'labyrinth' ? '🌀 The Labyrinth — no colony, no army, no way but through'
-      : this._campaignEncounter || custom ? `${levelById(Number(level))?.name || 'Battle'} — Prepare for battle` : 'Custom battle setup';
+      : this._campaignEncounter || custom ? `${levelById(Number(level))?.name || 'Battle'} — ${mode === 'campaign' ? 'Iron Rain' : 'Prepare for battle'}` : 'Custom battle setup';
     this.root.querySelector('#s-title').textContent = title;
     const fieldLabel = setupScreen.querySelector('.field-label');
     const heroLabel = setupScreen.querySelector('.hero-label');
@@ -2747,7 +2747,7 @@ export class UI {
     const controlMode = controls.controlMode || 'build';
     this.setControlMode(controlMode);
     q('#r-gold').innerHTML = `Gold <b>${Math.floor(game.gold)}</b><small class="income-rate">+${((game.incomeRate || 0) * 60).toFixed(1)}/min</small>`;
-    q('#r-gold').title = 'Gold · automatic income every 4 seconds. Fractional gold carries forward. Building and repair spending reduces the balance.';
+    q('#r-gold').title = 'Gold · income from surviving buildings. Captured ground needs a Forward Camp in Iron Rain. Building and repair spending reduces the balance.';
 
     // Threat: the clock that replaced nightfall. The bar inside the chip fills
     // toward the next surge, so "something is coming" is always legible.
@@ -2757,8 +2757,10 @@ export class UI {
     const frac = Math.max(0, Math.min(1, (game.threat || 0) % 1));
     q('#r-day').innerHTML = game.phase === 'found'
       ? '🏳️ <b>Claim your ground</b>'
+      : game.ironRain?.prep > 0
+        ? `<b>Prepare ${Math.ceil(game.ironRain.prep)}s</b>`
       : game.finalStand
-        ? labyrinth ? '👑 <b>The champion walks</b>' : '☠️ <b>Final counterattack</b>'
+        ? labyrinth ? '👑 <b>The champion walks</b>' : game.ironRain ? '<b>Defeat the commander</b>' : '☠️ <b>Final counterattack</b>'
         : labyrinth
           ? `${['🕯️ <b>Quiet</b>', '👣 <b>Something follows</b>', '☠️ <b>The pursuit</b>', '🚨 <b>The flood</b>'][game.pursuitStage || 0]}<i class="threatbar" style="--f:${Math.min(100, ((game.pursuitTime || 0) / 360) * 100).toFixed(0)}%"></i>`
           : game.mode === 'daily'
@@ -4113,7 +4115,7 @@ export class UI {
           : survival
           ? `The dead are endless — but you drove ${lv.name} to Threat ${threat}.${threat >= best ? ' 🏅 A new personal best!' : ` Best: ${best}.`}`
           : won
-          ? `${lv.name} is yours. Every hive is ash and their champion lies at your walls.`
+          ? `${lv.name} is yours. Every hive is ash and their commander is defeated.`
           : `The dead took the Keep at Threat ${threat}.`}</p>
         <div id="end-rewards">${this._endRewardsHtml(extra)}</div>
         <p id="end-unlock" class="tagline hidden"></p>

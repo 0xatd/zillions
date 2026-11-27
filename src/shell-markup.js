@@ -346,7 +346,7 @@ export function shellMarkup() {
           <div class="custom-filter-group" id="cu-mode-filters">
             <span>MODE</span>
             <button class="custom-filter sel" data-filter="all" type="button">ALL</button>
-            <button class="custom-filter" data-filter="campaign" type="button">SIEGE</button>
+            <button class="custom-filter" data-filter="campaign" type="button">IRON RAIN</button>
             <button class="custom-filter" data-filter="survival" type="button">SURVIVAL</button>
             <button class="custom-filter" data-filter="labyrinth" type="button">LABYRINTH</button>
           </div>

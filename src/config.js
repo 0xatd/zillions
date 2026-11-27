@@ -58,7 +58,7 @@ export const SIEGE = {
 export const NODE_KINDS = {
   ore: {
     name: 'Ore Field', icon: '⛏️', income: 2.0,
-    blurb: 'Rich ground. Pays double while you hold it.',
+    blurb: 'Rich ground. Double resource yield.',
   },
   quarry: {
     name: 'Quarry', icon: '🪨', income: 1.0, outpostHp: 0.5,

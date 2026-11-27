@@ -1307,6 +1307,8 @@ class App {
       ? `${level.name} — SURVIVAL. The siege never stops. A boss walks every fifth surge. How long can you last?`
       : mode === 'labyrinth'
       ? `${level.name} — raze every brood chamber, take its blessing, and kill ${level.boss.icon} ${level.boss.name} at the bottom. ${this.game.lives} lives.`
+      : this.game.ironRain
+      ? `${level.name} — IRON RAIN. Build and defend your economy. Destroy the enemy bases and their commander.`
       : `${level.name} — raze every hive, then break the counterattack. ${level.boss.icon} ${level.boss.name} leads it.`, '', 4500);
     const h = this.myHero();
     if (h) this.focus.set(h.x, 0, h.z);
@@ -2082,8 +2084,8 @@ class App {
       [14, `💰 Walk to a glowing foundation and HOLD ${build} — your coins build it.`],
       [24, `⚔️ Every gate is a ward: towers to hold it and a camp to muster at it. Press ${push} and those squads push out along the lanes on their own.`],
       [30, '🧱 Crag, water and deep wood are already wall — you only pay for the gaps. Out on the approaches, a fence across a pass costs almost nothing and funnels them into your tower.'],
-      [36, '🚩 Stand on a lane node with no enemies nearby to take it. Held nodes pay you and let you raise a Forward Camp.'],
-      [48, '🔥 Every hive keeps mustering until you raze it. Raze them all, then break the counterattack.'],
+      [36, this.game?.ironRain ? '🚩 Capture ground, then build a Forward Camp to extract its resources. Defend it to keep the income.' : '🚩 Stand on a lane node with no enemies nearby to take it. Held nodes pay you and let you raise a Forward Camp.'],
+      [48, this.game?.ironRain ? '🔥 Destroy bases to stop their reinforcements. The last base deploys its commander when attacked.' : '🔥 Every hive keeps mustering until you raze it. Raze them all, then break the counterattack.'],
       [62, `🔧 Damage repairs before upgrades — hold ${build} to restore health. Press ${tower} beside a tower to change what it shoots.`],
     ];
     this._tut = { steps, i: 0 };
