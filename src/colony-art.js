@@ -37,7 +37,7 @@ export function buildColonyStreets(map, roads, culture = 'european') {
     const lanes=roads.tiles.filter(([x,z])=>!pavedKeys.has(`${x},${z}`));
     make(lanes,environment.roads.dust,.04,.10,'soil');
     make(paved,palette.edge,.045,.04);
-    make(paved,palette.surface,.065,.11);
+    make(paved,palette.surface,.065,.11,culture==='european'?'deck':'armor');
     // Embedded lane guides belong to the verified road tiles, never adjacent
     // building footprints. A single mesh keeps the shared kit inexpensive.
     if (culture === 'european') {

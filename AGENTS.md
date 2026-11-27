@@ -1,3 +1,7 @@
+## Current scope override — 2026-11-27
+
+Alex explicitly paused overworld/campaign expansion. The active goal is futuristic Custom Castle Defense in Zillions style: first prove the core, then several distinct fun maps, with three documented polish passes. Preserve world/roster work on `codex/reference-integration-20261127` (checkpoint6decb54); do not resume without Alex. Earlier shared-world/Enter World navigation requirements below are historical and superseded for this core branch. Retain accounts/saves; do not delete user progression. Custom map play should be reachable directly without world travel or mandatory character creation.
+
 ## Party and Custom Battle language (Alex, 2026-11-27)
 
 Main-game grouping is **Parties**, not a separate Co-op mode: WoW-style persistent

@@ -11,7 +11,7 @@ import { Game } from './game.js';
 import { stateHash } from './lockstep-hash.js';
 import { dailyChallenge, validDay } from './daily.js';
 
-export const SIM_VERSION = 24;
+export const SIM_VERSION = 25;
 export const SHARE_REPLAY_VERSION = 1;
 
 export const SHARE_LIMITS = Object.freeze({

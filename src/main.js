@@ -201,7 +201,7 @@ class App {
     this._frustum = new THREE.Frustum();
     this._simTickMs = 0;
     this.focus = new THREE.Vector3(MAP_SIZE / 2, 0, MAP_SIZE / 2);
-    this.camDist = 46;           // high, narrow diorama camera (FOV 30)
+    this.camDist = 42;           // high, narrow diorama camera (FOV 30)
     this.sky = new SkyGradient();
     this.camYaw = 0;
     this.menuYaw = Math.PI * 0.25;
@@ -2792,7 +2792,7 @@ class App {
     if (this._startLock) return;
     this._startLock = true;
     try {
-      if (mode === 'campaign' && this.ui.selectedLeader) {
+      if (mode === 'campaign' && !this._isCustomBattle() && this.ui.selectedLeader) {
         const character = await this._bindDeployedLeader(this.ui.selectedLeader);
         if (!character?.proxyHero) {
           this.ui._clearBusy();
@@ -5867,6 +5867,7 @@ class App {
     this._worldEncounter=null;
     this.ui._showScreen('custom');
     this._renderCustomBrowser();
+    if(this.ui._customView==='arcade')return;
     this._openLobby().then((lobby) => {
       if (lobby?.connected) lobby.refreshGames().catch(() => this._renderCustomBrowser());
       else this._renderCustomBrowser();
@@ -8885,7 +8886,7 @@ class App {
 
     // Diorama angle: steep enough to read the whole base like a board game,
     // steeper still as you pull back.
-    const elev = lerp(0.95, 1.12, clamp((this.camDist - 22) / 73, 0, 1));
+    const elev = lerp(0.82, 1.05, clamp((this.camDist - 22) / 73, 0, 1));
     const hx = Math.cos(elev) * this.camDist, hy = Math.sin(elev) * this.camDist;
     let sx = 0, sz = 0;
     if (this.shake > 0) {

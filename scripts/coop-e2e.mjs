@@ -221,14 +221,13 @@ try {
   await configureRender(host.page);
   if(!await host.page.locator('#a-invite').isVisible()){
     await host.page.locator('#a-play').click();
-    if(await host.page.locator('#creator-next').isVisible()){
-      for(let step=0;step<5;step++)await host.page.locator('#creator-next').click();
-      await host.page.locator('#creator-name').fill('Coop Pilot');
-      await host.page.locator('#creator-submit').click();
-    }
-    await host.page.locator('#nav-home').click();
+    await host.page.locator('.custom-map-row').first().waitFor();
+    await host.page.locator('.custom-map-row').first().click();
+    await host.page.locator('#cu-join').click();
+    await host.page.locator('#s-invite').click();
+  } else {
+    await host.page.locator('#a-invite').click();
   }
-  await host.page.locator('#a-invite').click();
   await host.page.locator('#share-url').waitFor({ state: 'visible' });
   const invite = await host.page.locator('#share-url').inputValue();
   if (!invite.includes('coop=')) throw new Error(`invite was not created: ${invite} ${JSON.stringify(await dump(host.page, host.notes))}`);

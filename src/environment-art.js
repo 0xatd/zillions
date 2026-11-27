@@ -156,14 +156,31 @@ export function environmentMaterial(kind, options = {}) {
       float wear=artNoise(vec2(p.x*3.0,p.y*.23));
       diffuseColor.rgb*= (.91+grain*.09+broad*.10)*(1.-joint*.10)*(.96+wear*.05);
     `;
+    const deck = /* glsl */`
+      // Large service-deck plates, inset seams and restrained fasteners are
+      // original procedural material work, not geometry or collision objects.
+      vec2 p=artWorld.xz, cell=fract(p), edge=min(cell,1.-cell);
+      float seam=1.-smoothstep(.014,.045,min(edge.x,edge.y));
+      float lip=smoothstep(.035,.065,min(edge.x,edge.y))*(1.-smoothstep(.065,.10,min(edge.x,edge.y)));
+      float panelTone=.96+.08*artHash(floor(p));
+      float scuff=artNoise(vec2(p.x*7.,p.y*.6));
+      float bolt=1.-smoothstep(.017,.032,length(edge-vec2(.14)));
+      diffuseColor.rgb*=panelTone*(.94+scuff*.08)*(1.-seam*.35);
+      diffuseColor.rgb+=vec3(.035,.043,.045)*lip;
+      diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.10,.15,.17),bolt*.48);
+    `;
     const foliage = /* glsl */`
       float leaves=artNoise(artWorld.xz*9.0+artWorld.y*3.0);
       float clumps=artNoise(artWorld.xz*2.8);
-      diffuseColor.rgb*=.72+leaves*.3+clumps*.28;
+      // Painted canopy masses: cool shaded lower clumps and warm leaf tips.
+      // Broad value grouping survives the game camera; fine grain stays quiet.
+      float plane=abs(normalize(cross(dFdx(artWorld),dFdy(artWorld))).y);
+      vec3 shade=mix(vec3(.72,.85,.88),vec3(1.12,1.08,.86),plane);
+      diffuseColor.rgb*=shade*(.78+leaves*.14+clumps*.24);
     `;
-    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n' + (kind === 'ground' ? terrain : kind === 'rock' ? rock : kind === 'soil' ? soil : kind === 'armor' ? armor : kind === 'building' ? building : kind === 'foliage' ? foliage : stone));
+    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n' + (kind === 'ground' ? terrain : kind === 'rock' ? rock : kind === 'soil' ? soil : kind === 'armor' ? armor : kind === 'deck' ? deck : kind === 'building' ? building : kind === 'foliage' ? foliage : stone));
   };
-  material.customProgramCacheKey = () => 'frontier-art-v5-' + kind;
+  material.customProgramCacheKey = () => 'frontier-art-v6-' + kind;
   return material;
 }
 

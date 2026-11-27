@@ -947,6 +947,16 @@ export class Game {
         }
       });
     }
+    // A fresh defense starts with a small mixed squad per commander. Existing
+    // expedition armies replace it; restoring a save never calls founding.
+    if(this.mode==='campaign'&&!this.worldArmy.length){
+      for(const hero of this.heroes){
+        ['soldier','soldier','ranger','ranger','ranger'].forEach((key,i)=>{
+          const seat=this._reseat(hero.x+i-2,hero.z+2)||[hero.x,hero.z];
+          this._spawnUnit(key,seat[0],seat[1],null);
+        });
+      }
+    }
     if (this.firstSiege) {
       const reachable = this.nests.filter((n) => n.alive && !n.offMap);
       const live = reachable.length ? reachable : this.nests.filter((n) => n.alive);
@@ -986,7 +996,7 @@ export class Game {
     if (!this.firstSiege) return null;
     if (this.firstSiege.stage === 'opening') return {
       title: 'CHOOSE YOUR OPENING',
-      detail: 'Economy: Cottage or Field · Defense: Tower · Army: Militia Camp',
+      detail: 'Choose Economy, Defense or Army. Income and attacks begin after your first purchase.',
       nest: this.nests[this.firstSiege.nestId] || null,
     };
     if (this.firstSiege.stage === 'warning') {
@@ -998,8 +1008,8 @@ export class Game {
       };
     }
     if (this.firstSiege.stage === 'defend') return {
-      title: `DEFEND THE CITY · ${this.firstSiege.waveIds.length} remain`,
-      detail: 'Pick off the spitters. Leave the brute’s orange smash ring. Gold contacts mark this wave.',
+      title: `${this.firstSiegeRelief()?'FIRST ATTACK':'REINFORCEMENTS ACTIVE'} · ${this.firstSiege.waveIds.length} remain`,
+      detail: this.firstSiegeRelief()?'Gold contacts mark the first attack. Hunt down the remaining spitters.':'New attacks are arriving. Clear the gold-marked enemies to finish the first defense.',
     };
     return null;
   }
@@ -2115,6 +2125,9 @@ export class Game {
   // Income is credited automatically now. Physical coins fall from combat and
   // conquest only — no more laps around your own town at dawn.
   _updateIncome(dt) {
+    // Learning time is free, not an unlimited resource farm. Both income and
+    // enemy pressure begin with the first opening purchase.
+    if(this.firstSiege?.stage==='opening'){this.incomeRate=0;return;}
     let rate = 0;
     for (const b of this.buildings) if (b.alive && b.def.income) rate += b.def.income;
     rate *= this.economy.income * (1 + this.relicMods.income);

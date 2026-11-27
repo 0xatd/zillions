@@ -1,3 +1,4 @@
+import {assembleBattleHUD, abilityGlyph, itemGlyph, hudGlyph} from './battle-hud-art.js';
 import { battlefieldAwareness } from './battlefield-awareness.js';
 import { LEADER_ARCHETYPES } from './leader-archetypes.js';
 import { heroCopy, bearing } from './campaign-presentation.js';
@@ -84,6 +85,7 @@ export class UI {
 
   _buildDOM() {
     this.root.innerHTML = shellMarkup();
+    assembleBattleHUD(this.root);
 
     // ----- main menu -----
     const q = (s) => this.root.querySelector(s);
@@ -150,7 +152,7 @@ export class UI {
     q('#a-offline').onclick = () => { this._offlineAccepted = true; if (this.cb.onOfflineContinue) this.cb.onOfflineContinue(); };
     q('#a-credits').onclick = () => this._showScreen('credits');
     q('#a-settings').onclick = () => this._showScreen('settings');
-    q('#nav-squad').onclick = () => this.cb.onCustomOpen?.();
+    q('#nav-squad').onclick = () => {this._customView='live';this.cb.onCustomOpen?.();};
     const social = q('#social-panel');
     q('#social-content').append(q('#screen-squad'));
     q('#screen-squad').classList.remove('hidden', 'shell-screen');
@@ -161,7 +163,7 @@ export class UI {
     social.addEventListener('keydown', e => e.stopPropagation());
     q('#nav-armory').onclick = () => this.showCharacterSheet('character');
     q('#nav-account').onclick = () => q('#account-card')?.classList.toggle('hidden');
-    q('#nav-home').onclick = () => this.cb.onEnterWorld?.();
+    q('#nav-home').onclick = () => this._playFromTitle();
     q('#leader-custom').onclick = () => this.cb.onCustomOpen?.();
     q('#leader-back').onclick = () => this._showScreen('account');
     q('#tab-campaign').onclick = () => this.cb.onCampaignMap && this.cb.onCampaignMap();
@@ -237,6 +239,7 @@ export class UI {
       this._selectedCustomGame = null;
       this._selectedArcadeMap = null;
       this._renderCustomRows();
+      if(this._customView==='live')this.cb.onCustomRefresh?.();
     };
     for (const filter of this.root.querySelectorAll('.custom-filter')) filter.onclick = () => {
       this._customFilter = filter.dataset.filter;
@@ -767,8 +770,8 @@ export class UI {
 
   _playFromTitle() {
     this.cb.onLeaderEntry?.();
-    if (this._profile?.mmoCharacters?.length) { this._showScreen('main'); return; }
-    this.showCharacterCreator();
+    this._customView='arcade';
+    this.cb.onCustomOpen?.();
   }
 
   _wireMenuLists() {
@@ -846,7 +849,7 @@ export class UI {
     this._customHost = hostName;
     this._customGames = games;
     this._customOffline = offline;
-    this._customView = this._customView || 'live';
+    this._customView = this._customView || 'arcade';
     this._customFilter = this._customFilter || 'all';
     this._arcadeFilter = this._arcadeFilter || 'all';
     const character = this._sheetCharacter();
@@ -859,10 +862,10 @@ export class UI {
 
   _arcadeMaps() {
     return [
-      ...LEVELS.map((level) => ({
+      ...[...LEVELS].sort((a,b)=>[1,3,2,4,5].indexOf(a.id)-[1,3,2,4,5].indexOf(b.id)).map((level) => ({
         id: `campaign-${level.id}`, level: level.id, mode: 'campaign', name: level.name,
         icon: '⚔️', author: 'Zillions', players: '1–4', difficulty: 'Normal',
-        description: level.blurb || level.desc || 'Take the planet in a continuous siege.',
+        description: ({1:'Build a frontier fortress, hold the forest approaches, then lead your army against three hives.',3:'Defend an exposed industrial outpost. Shift your hero and reserves between separated enemy approaches.',2:'Fortify a river bend, then choose between safe nearby income and richer deposits farther from your defenses.'})[level.id] || level.blurb || level.desc || 'Build, defend, and lead the counterattack.',
       })),
       ...LABYRINTH_LEVELS.map((level) => ({
         id: `labyrinth-${level.id}`, level: level.id, mode: 'labyrinth', name: level.name,
@@ -2380,6 +2383,7 @@ export class UI {
     setupScreen.classList.toggle('roommode', !!online);
     setupScreen.classList.toggle('campaign-encounter', this._campaignEncounter);
     setupScreen.classList.toggle('custom-room', !!online && this._customBattle);
+    setupScreen.classList.toggle('custom-map-setup', custom && !online && !coop && !share);
     setupScreen.classList.toggle('sharemode', !!share);
     setupScreen.classList.remove('room-host', 'room-guest');
     this._loadHeroPortraits();
@@ -2388,7 +2392,7 @@ export class UI {
       : coop ? 'Party battle — one hero each'
       : mode === 'survival' ? '💀 Survival — how high can you drive the Threat?'
       : mode === 'labyrinth' ? '🌀 The Labyrinth — no colony, no army, no way but through'
-      : this._campaignEncounter ? `${levelById(Number(level))?.name || 'Campaign'} — Prepare for battle` : 'Custom battle setup';
+      : this._campaignEncounter || custom ? `${levelById(Number(level))?.name || 'Battle'} — Prepare for battle` : 'Custom battle setup';
     this.root.querySelector('#s-title').textContent = title;
     const fieldLabel = setupScreen.querySelector('.field-label');
     const heroLabel = setupScreen.querySelector('.hero-label');
@@ -2540,7 +2544,7 @@ export class UI {
   _queueLevelThumb(lv, canvas, locked) {
     this._thumbCache = this._thumbCache || new Map();
     const cached = this._thumbCache.get(lv.id);
-    if (cached) { canvas.getContext('2d').drawImage(cached, 0, 0); if (locked) this._dimThumb(canvas); return; }
+    if (cached) { canvas.getContext('2d').drawImage(cached, 0, 0, canvas.width, canvas.height); if (locked) this._dimThumb(canvas); return; }
     this._thumbQueue = this._thumbQueue || [];
     this._thumbQueue.push({ lv, canvas, locked });
     if (this._thumbTimer) return;
@@ -2620,6 +2624,7 @@ export class UI {
     this._stance = null;
     this._nearestContact = null;
     this._upgradesOpen = false;
+    this._itemsKey = null; this._packKey = null;
     this._upgradePanelKey = null;
     this._combatAlertKey = null;
     this.root.querySelector('#topbar').classList.remove('hidden');
@@ -2641,10 +2646,11 @@ export class UI {
         ...(d.passives || []).map((passive, index) => ({
           kind: `PASSIVE ${index + 1}`, icon: passive.icon, name: passive.name, desc: passive.desc,
         })),
-        ...heroAbilities(d).filter(Boolean).map((ab,slot)=>({kind:ab.passive?'PASSIVE':abilityKeyLabel(this._binds||loadBinds(),slot),icon:ab.icon,name:ab.name,desc:ab.desc,active:!ab.passive})),
+        ...heroAbilities(d).filter(ability => ability && !ability.passive).map(ability => ({kind:'ACTIVE',name:ability.name,desc:ability.desc,active:true})),
       ].filter(Boolean);
-      kit.innerHTML = entries.map((entry) => `<div class="fight-ability${entry.active ? ' active' : ''}" title="${escapeHtml(entry.desc || '')}">
-        <span>${icon(entry.kind==='AURA'?'travel':entry.active?'assault':'defend')}</span><b>${escapeHtml(entry.name)}</b><small>${entry.kind}</small>
+      // Active skills live in the command slots, not duplicated in the status strip.
+      kit.innerHTML = entries.filter(entry => !entry.active).map((entry) => `<div class="fight-ability${entry.active ? ' active' : ''}" title="${escapeHtml(entry.desc || '')}">
+        <span>${hudGlyph(entry.kind==='AURA'?'wave':'armor')}</span><b>${escapeHtml(entry.name)}</b><small>${entry.kind}</small>
       </div>`).join('');
     }
     const face = this.root.querySelector('#a-face');
@@ -2681,7 +2687,7 @@ export class UI {
     const label = chip.querySelector('span');
     if (label) label.textContent = fighting ? 'Fight mode' : 'Build mode';
     this.root.querySelector('#fight-kit')?.classList.toggle('hidden', !fighting || !!this._game?.heroes[this._p]?.def.abilities);
-    this.root.querySelector('#herostats')?.classList.toggle('hidden', fighting);
+    this.root.querySelector('#herostats')?.classList.remove('hidden');
     chip.title = fighting
       ? `${this._keyLabel('build_mode')} switches to Build mode. ${this._keyLabel('dodge')} dodges; ${this._keyLabel('ability1')} uses the special.`
       : `${this._keyLabel('build_mode')} switches to Fight mode. Hold ${this._keyLabel('dodge')} or ${this._keyLabel('build')} to build.`;
@@ -2784,6 +2790,7 @@ export class UI {
       }
     }
     if (labyrinth) {
+      q('#army-status').title = '';
       const active = game.labyrinthEncounters?.find((e) => e.status === 'active');
       const def = active && game.map.labyrinthLayout?.encounters?.find((e) => e.key === active.key);
       const room = def && game.map.labyrinthLayout?.rooms?.[def.room];
@@ -2802,9 +2809,13 @@ export class UI {
         attack: 'pushing the lanes',
         rally: 'holding rally point',
       }[game.stance] || 'awaiting orders';
-      q('#army-status').innerHTML = army
-        ? `<b>${army}</b> troops in <b>${squads || army}</b> formations · ${stanceText} · camps keep mustering`
+      const armyStatus = q('#army-status');
+      const formationDetail = army
+        ? `${army} troops in ${squads || army} formations · ${stanceText} · camps keep mustering`
         : 'Build militia, ranger, or sniper camps — they muster squads forever.';
+      const waveStatus = firstSiege?.title.replace('CHOOSE YOUR OPENING','Choose opening').replace('FIRST SIEGE','Wave').replace('FIRST ATTACK','First wave').replace('REINFORCEMENTS ACTIVE','Reinforcements active').replace(' remain',' left');
+      armyStatus.textContent = waveStatus ? `${army} troops · ${waveStatus}` : army ? `${army} troops · ${squads || army} formations` : 'No troops · Build a camp';
+      armyStatus.title = [firstSiege?.title, firstSiege?.detail, formationDetail].filter(Boolean).join(' ');
     }
     if (this._awarenessGame !== game || !this._awareness || game.time < this._awarenessTime || game.time - this._awarenessTime >= .25) {
       this._awarenessGame = game;
@@ -2868,6 +2879,10 @@ export class UI {
       q('#a-lvl').title = this._hudCharacter ? `Leader level ${this._hudCharacter.level} is permanent. Match upgrades apply during this siege.` : 'Level during this siege';
       q('#a-lvl').textContent = h.dead ? `☠️ ${Math.ceil(h.reviveT)}s` : `Match Lv ${h.level}`;
       q('#a-hp').style.width = `${Math.max(0, (h.hp / h.maxHp) * 100)}%`;
+      q('#hud-hp-text').textContent = `${Math.max(0,Math.ceil(h.hp))} / ${Math.ceil(h.maxHp)} HP`;
+      q('#hud-resource-fill').parentElement.hidden = !h.def.mana;
+      q('#hud-resource-text').textContent = h.def.mana ? `${Math.floor(h.spells?.mana ?? h.def.mana)} ${h.def.resource || 'MP'}` : '';
+      q('#hud-resource-fill').style.width = h.def.mana ? `${Math.max(0,Math.min(100,(h.spells?.mana ?? h.def.mana)/h.def.mana*100))}%` : '0%';
       q('#a-hp').parentElement.classList.toggle('critical', !h.dead && h.hp / h.maxHp <= 0.25);
       const need = xpForLevel(h.level);
       q('#a-xp').style.width = h.level >= HERO_MAX_LEVEL ? '100%' : `${(h.xp / need) * 100}%`;
@@ -2876,9 +2891,9 @@ export class UI {
       const itemsKey = (h.items || []).join(',');
       if (this._itemsKey !== itemsKey) {
         this._itemsKey = itemsKey;
-        q('#a-items').innerHTML = (h.items || [])
-          .slice(0, 4).map((k) => { const it = itemInfo(k); return it ? `<span class="hitem" title="${it.name} — ${it.desc || itemLines(it).join(', ')}">${it.icon}</span>` : ''; })
-          .join('') + ((h.items || []).length > 4 ? `<button class="hitem" aria-label="View all automatic bonuses">+${h.items.length - 4}</button>` : '');
+        q('#a-items').innerHTML = Array.from({length:4},(_,i)=>{const k=(h.items||[])[i],it=k&&itemInfo(k);return `<button type="button" class="hitem hud-item${it?'':' empty'}" aria-label="${escapeHtml(it?it.name:'Empty equipment slot')}" title="${escapeHtml(it?`${it.name} — ${it.desc||itemLines(it).join(', ')}`:'Empty equipment slot')}">${it?itemGlyph(it):hudGlyph('empty')}</button>`;}).join('');
+        if((h.items||[]).length>4)q('#a-items').lastElementChild.insertAdjacentHTML('beforeend',`<small>+${h.items.length-4}</small>`);
+        q('#a-items').onclick=()=>{this._battlePanel={mode:'items'};};
       }
 
       // Pack: what this hero has picked up off the field, and how much room is
@@ -2886,8 +2901,7 @@ export class UI {
       const packKey = (h.pack || []).join(',');
       if (this._packKey !== packKey) {
         this._packKey = packKey;
-        const full = (h.pack || []).length >= PACK_SLOTS;
-        q('#a-pack').innerHTML = `<button class="pack-open${full ? ' full' : ''}" aria-label="View carried items">Items · Pack ${(h.pack || []).length}/${PACK_SLOTS}${full ? ' FULL' : ''}</button>`;
+        q('#a-pack').innerHTML = Array.from({length:PACK_SLOTS},(_,i)=>{const k=(h.pack||[])[i],it=k&&itemInfo(k);return `<button type="button" class="pack-open hud-item${it?'':' empty'}" aria-label="${escapeHtml(it?`View ${it.name}`:`Empty field pack slot ${i+1}`)}" title="${escapeHtml(it?`${it.name} — ${it.desc||itemLines(it).join(', ')}`:'Empty field pack slot · Pick up field loot')}">${it?itemGlyph(it):hudGlyph('empty')}</button>`;}).join('');
       }
 
       const stats = game.heroStats ? game.heroStats(h) : null;
@@ -2913,7 +2927,7 @@ export class UI {
         const empty=charge?.count===0;
         const noMana=(h.spells?.mana ?? h.def.mana ?? 0)<spellManaCost(h,slot);
         const label = abilityKeyLabel(this._binds || loadBinds(), slot);
-        return `<button data-ability-slot="${slot}" ${h.dead || cd > 0 || empty || noMana || ability.passive ? 'disabled' : ''} title="${escapeHtml(ability.desc || '')}">${ability.icon || ''} ${escapeHtml(ability.name)}<small>${ability.passive ? 'Passive' : noMana ? 'Low mana' : empty ? Math.ceil(charge.t)+'s' : cd > 0 ? Math.ceil(cd) + 's' : label}</small></button>`;
+        return `<button class="hud-ability" data-ability-slot="${slot}" ${h.dead || cd > 0 || empty || noMana || ability.passive ? 'disabled' : ''} aria-label="${escapeHtml(ability.name)}" title="${escapeHtml(`${ability.name} — ${ability.desc || ''}`)}"><kbd>${label}</kbd>${abilityGlyph(ability)}<span class="hud-ability-name">${escapeHtml(ability.name)}</span><small>${noMana ? 'Low mana' : empty ? Math.ceil(charge.t)+'s' : cd > 0 ? Math.ceil(cd) + 's' : ''}</small></button>`;
       }).join('');
       if (slots.innerHTML !== slotMarkup) slots.innerHTML = slotMarkup;
 
@@ -2946,7 +2960,7 @@ export class UI {
         const cd = Math.max(0, h.abilCd);
         const rank = abilityRank(h.level, h.upgrades);
         const ultRank = (h.upgrades?.ult || 0);
-        this._paintBig(big, 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready'), `<span class="bicon">${icon('assault')}</span><span class="btext">${ab.name} <small>${h.def.mana ? `${Math.floor(h.spells?.mana ?? h.def.mana)}/${h.def.mana} ${h.def.resource || 'MP'}${ab.charges ? ` · ${h.spells?.charges?.[0]?.count ?? ab.charges}/${ab.charges} charges` : ''}` : `${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3`} · ${this._keyLabel('ability1')} · ${this._keyLabel('build_mode')} construction</small></span>` +
+        this._paintBig(big, 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready'), `<kbd>${this._keyLabel('ability1')}</kbd>${abilityGlyph(ab)}<span class="hud-ability-name">${escapeHtml(ab.name)}</span><span class="hud-ability-meta">${ab.charges ? `${h.spells?.charges?.[0]?.count ?? ab.charges}/${ab.charges} charges` : !h.def.mana ? `Rank ${rank} · Ult ${ultRank}` : ''}</span>` +
           (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : ''), h.dead || cd > 0 || h.spells?.charges?.[0]?.count===0 || (h.spells?.mana ?? h.def.mana ?? 0)<spellManaCost(h,0));
       }
     }

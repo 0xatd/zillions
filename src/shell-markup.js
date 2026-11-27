@@ -151,8 +151,8 @@ export function shellMarkup() {
       <div id="screen-account" class="shell-screen title-screen">
         <header class="title-identity"><span>THE FRONTIER AWAITS</span><h1>ZILLIONS</h1></header>
         <nav class="menu-list" aria-label="Title menu">
-          <button type="button" class="menu-word is-focus" id="a-play"><b>Enter World</b></button>
-          <button type="button" class="menu-word" id="nav-squad">Custom Battles</button>
+          <button type="button" class="menu-word is-focus" id="a-play"><b>Play</b></button>
+          <button type="button" class="menu-word" id="nav-squad">Multiplayer</button>
           <button type="button" class="menu-word" id="nav-armory">Armory</button>
           <button type="button" class="menu-word" id="a-settings">Settings</button>
           <button type="button" class="menu-word" id="nav-account">Account</button>
@@ -198,7 +198,7 @@ export function shellMarkup() {
           <span class="roster-label">YOUR CHARACTERS</span>
           <div id="character-list" class="character-cards"></div>
           <button type="button" class="character-card new-card" id="m-create-character">+ Create Character</button>
-          <button type="button" class="menu-word" id="nav-home">Enter World</button>
+          <button type="button" class="menu-word" id="nav-home">Play a Map</button>
           <button type="button" class="menubtn custom-entry" id="leader-custom">Custom Battles</button><button type="button" class="character-sheet-open danger" id="m-delete-character">RETIRE LEGACY CHARACTER</button>
           <div id="first-hour-guide" class="first-hour-guide hidden" role="status"></div>
         </aside>
@@ -289,15 +289,15 @@ export function shellMarkup() {
         </div>
         <div id="sheet-panel-character" class="sheet-panel character-overview"></div>
         <div id="sheet-panel-gear" class="sheet-panel hidden">
-          <div class="gear-paperdoll"><h3>EQUIPPED</h3><div id="sheet-guide-gear" class="sheet-guide"></div><div class="gear-slots" id="gear-slots"></div></div>
+          <div class="gear-paperdoll"><h3>EQUIPPED</h3><div class="gear-slots" id="gear-slots"></div><div id="sheet-guide-gear" class="sheet-guide"></div></div>
           <div class="gear-stash"><h3>FIELD STASH <small id="gear-stash-count"></small></h3><div id="gear-stash-list"></div></div>
           <div class="gear-inspector"><h3>ITEM DETAILS</h3><div id="gear-item-detail" class="gear-item-detail"><p>Select an item to inspect it. Double-click a stash item to equip it.</p></div><div class="gear-stats"><h3>CURRENT ATTRIBUTES</h3><div id="gear-stat-list"></div></div></div>
         </div>
         <div id="sheet-panel-shop" class="sheet-panel market-panel hidden">
-          <section class="market-head"><div><span class="modeeyebrow">QUARTERMASTER</span><h2 id="market-vendor-name">FRONTIER QUARTERMASTER</h2><p id="market-vendor-description">Rotating field gear. Buy with Salvage Alloy or sell recovered equipment.</p><div id="sheet-guide-market" class="sheet-guide"></div></div><strong id="market-balance"></strong></section>
+          <section class="market-head"><div><span class="modeeyebrow">QUARTERMASTER</span><h2 id="market-vendor-name">FRONTIER QUARTERMASTER</h2><p id="market-vendor-description">Rotating field gear. Buy with Salvage Alloy or sell recovered equipment.</p></div><strong id="market-balance"></strong></section>
           <nav id="market-vendors" class="market-vendors" aria-label="Specialist vendors"></nav>
           <section><h3>FOR SALE</h3><div class="market-grid" id="market-stock"></div></section>
-          <section><h3>YOUR STASH</h3><div class="market-grid" id="market-sell"></div></section>
+          <section><h3>YOUR STASH</h3><div class="market-grid" id="market-sell"></div></section><div id="sheet-guide-market" class="sheet-guide"></div>
         </div>
         <div id="sheet-panel-crafting" class="sheet-panel crafting-panel hidden">
           <section><span class="modeeyebrow">ORBITAL FORGE</span><h2>CRAFTING & SOCKETS</h2><p>Modify your leader’s equipment with sockets and components.</p><div id="sheet-guide-forge" class="sheet-guide"></div><div id="craft-resources"></div><div id="craft-vendor"></div></section>

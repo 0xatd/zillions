@@ -59,7 +59,7 @@ export const CITY_PLANS = {
   bastion: {
     key: 'bastion',
     label: 'ringed bastion',
-    blurb: 'A closed ring with four gates. Nothing is safe, nothing is far.',
+    blurb: 'A compact defensive ring shaped by the surrounding terrain. Hold the approaches, then push out.',
     scale: 1.0,
     gates: [0, Math.PI / 2, Math.PI, -Math.PI / 2],
     radius: (t, R) => R,
