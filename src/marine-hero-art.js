@@ -65,6 +65,18 @@ export function extrasAreTwoHanded(extras) {
   return extras?.two_handed === true;
 }
 
+// Textures a marine-hero Lambert keeps. material.dispose() does not free them.
+// `map` is the albedo; `normalMap` is the tangent normal on Rykus, Tynor and Draco.
+export function materialTextures(material) {
+  if (!material) return [];
+  const found = [];
+  for (const slot of ['map', 'normalMap']) {
+    const texture = material[slot];
+    if (texture && !found.includes(texture)) found.push(texture);
+  }
+  return found;
+}
+
 // Shared shoulder pitch for a two-handed rifle. Both arms use this same x
 // so the left hand stays on the handguard. stride is the walk cycle (signed),
 // recoil and windup are 0..1 attack phases, cast is the 0..1 ability pulse.

@@ -7,7 +7,7 @@ import { culture, CULTURES, DEFAULT_CULTURE, SHARED_KIT, activeCulture } from '.
 import { marineFlag } from './marine-recipe.js';
 import {
   extrasAreTwoHanded, isGlbBytes, marineHeroAssetKey, marineHeroLoadUrls, marineHeroManifest,
-  MARINE_HERO_LOD_NAMES,
+  MARINE_HERO_LOD_NAMES, materialTextures,
 } from './marine-hero-art.js';
 
 const TEMPLATES = {};
@@ -182,12 +182,32 @@ function applyMarineHeroMaterial(mesh) {
   }
 }
 
-function disposeTemplateGeometry(holder) {
-  holder?.traverse((node) => {
+// Textures from a template that was replaced. Live clones still share them, so
+// they stay allocated until releaseRetiredHeroTextures(), which runs after
+// those clones have been removed. A second dispose is a no-op in this Three
+// build once the GPU resource is gone.
+const retiredHeroTextures = [];
+
+function retireTemplate(holder) {
+  if (!holder) return;
+  const seen = new Set();
+  holder.traverse((node) => {
     if (node.geometry) node.geometry.dispose();
     const mats = Array.isArray(node.material) ? node.material : (node.material ? [node.material] : []);
-    for (const mat of mats) mat.dispose();
+    for (const mat of mats) {
+      for (const texture of materialTextures(mat)) {
+        if (seen.has(texture)) continue;
+        seen.add(texture);
+        retiredHeroTextures.push(texture);
+      }
+      mat.dispose();
+    }
   });
+}
+
+export function releaseRetiredHeroTextures() {
+  const batch = retiredHeroTextures.splice(0, retiredHeroTextures.length);
+  for (const texture of batch) texture.dispose();
 }
 
 function adoptTemplate(key, root) {
@@ -221,12 +241,12 @@ function adoptTemplate(key, root) {
 function storeTemplate(key, scene) {
   const previous = TEMPLATES[key];
   if (!scene) {
-    if (previous) disposeTemplateGeometry(previous);
+    if (previous) retireTemplate(previous);
     delete TEMPLATES[key];
     return false;
   }
   TEMPLATES[key] = adoptTemplate(key, scene);
-  if (previous) disposeTemplateGeometry(previous);
+  if (previous) retireTemplate(previous);
   return true;
 }
 

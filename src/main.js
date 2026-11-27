@@ -26,8 +26,8 @@ import { surveySite } from './plots.js';
 import { Game, runScore, isCompatibleSnapshot } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
-import { loadAssets, reloadMarineHeroes, loadKitCulture, assetClone, assetPart, hasKit, kitClone, kitMaterials, kitGeometry } from './assets.js';
-import { allowsSeparateWeaponRecoil, applyTwoHandArms, marineHeroHasLod, marineHeroUsesLod, twoHandArmCues } from './marine-hero-art.js';
+import { loadAssets, reloadMarineHeroes, releaseRetiredHeroTextures, loadKitCulture, assetClone, assetPart, hasKit, kitClone, kitMaterials, kitGeometry } from './assets.js';
+import { allowsSeparateWeaponRecoil, applyTwoHandArms, marineHeroHasLod, marineHeroUsesLod, materialTextures, twoHandArmCues } from './marine-hero-art.js';
 import { loadMarineKit, marineKitReady, marineForUnit, setMarineLod, MARINE_FLAGS } from './marine-assembler.js';
 import { NetSession } from './net.js';
 import { getSupabaseClient } from './supabase.js';
@@ -6685,7 +6685,12 @@ class App {
     const apply = () => reloadMarineHeroes(choice).then(() => {
       if (generation !== this._marineHeroGeneration) return;
       this._dropMarineHeroLodMeshes();
-    }).catch(() => {});
+    }).finally(() => {
+      // Clones shared the retired template's albedo and normal map. Free both
+      // only after those meshes are gone. A superseded reload leaves the
+      // batch for the reload that actually drops the meshes.
+      if (generation === this._marineHeroGeneration) releaseRetiredHeroTextures();
+    });
     this._marineHeroJob = Promise.resolve(this._marineHeroJob).then(apply, apply);
   }
 
@@ -7475,7 +7480,7 @@ class App {
       if (o.userData.ink) return; // shared ink-outline material
       const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
       for (const mat of mats) {
-        if (mat.map) mat.map.dispose();
+        for (const texture of materialTextures(mat)) texture.dispose();
         mat.dispose();
       }
     });

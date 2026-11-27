@@ -12,6 +12,7 @@ import {
   marineHeroLoadUrls,
   marineHeroManifest,
   marineHeroUsesLod,
+  materialTextures,
   twoHandArmCues,
   twoHandArmRotation,
 } from '../src/marine-hero-art.js';
@@ -40,6 +41,8 @@ test('assets.js copies that manifest when marine heroes are enabled', async () =
   assert.match(src, /Object\.assign\(MANIFEST,\s*marineHeroManifest\(\)\)/);
   assert.match(src, /isGlbBytes/);
   assert.match(src, /marineHeroLoadUrls/);
+  assert.match(src, /releaseRetiredHeroTextures/);
+  assert.match(src, /materialTextures\(mat\)/);
 });
 
 test('LOD file loads only for the Low graphics choice', () => {
@@ -115,11 +118,22 @@ test('two-handed heroes share one arm rotation and skip the rifle recoil offset'
   assert.equal(allowsSeparateWeaponRecoil(false, -0.45), false);
 });
 
+test('replacing a hero releases the normal map as well as the albedo', () => {
+  const albedo = { name: 'albedo' };
+  const normal = { name: 'normal' };
+  assert.deepEqual(materialTextures({ map: albedo, normalMap: normal }), [albedo, normal]);
+  assert.deepEqual(materialTextures({ map: albedo, normalMap: albedo }), [albedo]);
+  assert.deepEqual(materialTextures({}), []);
+  assert.deepEqual(materialTextures(null), []);
+});
+
 test('the renderer reads two_handed from the loaded model', async () => {
   const src = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
   assert.match(src, /g\.userData\.twoHanded = marineHero\.userData\.twoHanded === true/);
   assert.match(src, /applyTwoHandArms\(limbs, twoHandArmCues\(/);
   assert.match(src, /allowsSeparateWeaponRecoil\(rec\.mesh\.userData\.twoHanded === true, attackPulse\)/);
   assert.match(src, /marineHeroUsesLod/);
+  assert.match(src, /releaseRetiredHeroTextures\(\)/);
+  assert.match(src, /materialTextures\(mat\)/);
   assert.doesNotMatch(src, /'scott'.*'alexander'.*'danny'/);
 });
