@@ -117,3 +117,8 @@ Deployment correction: production's marine-kit URL was verified to return a
 exceptions. This also restores the existing authored colony-troop path on
 Git-based deployments. Do not infer actual asset delivery from HTTP200 alone;
 verify the GLB magic bytes in preview/release checks.
+
+Runtime GLBs now request the public R2 host from `src/asset-base.js` first,
+then the same-origin path, then the procedural or existing hero mesh. The Git
+LFS rule for `*.glb` stays until that host is populated and a production
+response starts with `glTF`. The two marine-kit exceptions stay as well.

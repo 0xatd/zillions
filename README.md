@@ -413,6 +413,58 @@ Third-party model terms are in `assets/KAYKIT-LICENSE.txt`.
 
 Three.js terms are in `vendor/THREE-LICENSE.md`.
 
+### Model files on R2
+
+Runtime `.glb` files load from Cloudflare R2, then from the same relative path
+on the site, then from the procedural mesh or the existing hero model. A
+response that is not a GLB, including a Git LFS pointer, is rejected before
+parse. The game keeps running.
+
+The default host is the public bucket `zillions-assets`:
+
+`https://pub-cf11595eb9c04887b6187ec78f8dcbd5.r2.dev`
+
+Paths stay the repo paths, for example
+`assets/art-marines/hero_sniper.glb`. `assets.taborlin.co` is the planned
+custom domain and is not attached yet. Change the host in any of these ways,
+highest priority first:
+
+1. `?assetBase=https://assets.taborlin.co` on the page URL. An empty
+   `?assetBase=` uses this origin only.
+2. `window.ZILLIONS_ASSET_BASE`, set before the modules run.
+3. The `zillions-asset-base` meta tag in `index.html`.
+4. `ZILLIONS_ASSET_BASE` when the code runs under Node.
+
+The site is static. A Vercel environment variable is not copied into the
+browser. Edit `DEFAULT_ASSET_BASE_URL` in `src/asset-base.js`, or set the meta
+tag, when the custom domain is attached.
+
+Upload every real GLB under `assets/`. The script puts objects. It does not
+delete keys. Authenticate Wrangler first (`npx wrangler login`, or
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`). Pull LFS bytes first so
+pointer files are skipped instead of published:
+
+```bash
+git lfs pull
+node scripts/upload-assets-r2.mjs --dry-run
+node scripts/upload-assets-r2.mjs
+```
+
+`npm run assets:r2` is the same upload. One object, without the script:
+
+```bash
+npx wrangler r2 object put zillions-assets/assets/art-marines/hero_sniper.glb \
+  --file=assets/art-marines/hero_sniper.glb \
+  --content-type=model/gltf-binary \
+  --cache-control="public, max-age=31536000" \
+  --remote
+```
+
+`.gitattributes` still tracks `*.glb` with Git LFS, except the two compact
+marine-kit files. Leave that in place until the bucket is populated and a
+production fetch of a hero GLB starts with the `glTF` magic bytes. Removing
+LFS before that check would serve pointer text again whenever R2 is down.
+
 Use `assets.html` to review audio assets. Use `art-slice.html` to review
 production GLBs at gameplay distance and in silhouette mode. The production
 game does not link to either page.

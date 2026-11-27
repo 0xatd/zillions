@@ -70,6 +70,7 @@ Default branch: main
 - src/auth.js owns sign-in, profiles, and saves. It reads stats and character progress; it never writes them.
 - src/supabase.js provides the one shared Supabase client.
 - src/assets.js loads authored GLB assets and keeps procedural fallbacks.
+- src/asset-base.js is the GLB host. The default is the public R2 bucket. A failed or non-GLB response falls back to the same-origin path, then to the procedural mesh.
 - src/marine-hero-art.js chooses the marine-hero GLB (full file, or the Low-preset LOD) and the shared two-handed arm pose. A failed or non-GLB hero file falls back to the existing hero mesh.
 - src/horde-art.js owns per-type instanced zombie models (presentation only).
 - src/unit-art.js owns procedural troop and hero rigs (presentation only).
