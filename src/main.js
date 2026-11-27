@@ -1,3 +1,4 @@
+import { WORLD_PLAY_ENABLED } from './modes.js';
 import {StrategicMap,settleLocalEncounter,reserveLocalEncounter} from './strategic-map.js';
 import { RoomRelay } from './room-relay.js';
 import { HitFeedback } from './hit-feedback.js';
@@ -2285,6 +2286,7 @@ class App {
   }
 
   _openOverworld() {
+    if (!WORLD_PLAY_ENABLED) return;
     if (this.game && !this.game.over) return;
     if (this.auth?.isSignedIn() && !selectedMmoCharacter(this.profile)) {
       this.ui.showCharacterCreator();

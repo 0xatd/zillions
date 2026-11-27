@@ -1,3 +1,8 @@
+
+## Custom Games-only direction — Alex, 2026-11-27 21:15 UTC
+
+Enter World stays gray and disabled. Custom Games is the only active play/development path. Start with the existing maps; then attempt to rebuild the Custom Castle Defense reference map in Three.js. Good, approved standalone scenarios may eventually be reused in the overworld; that integration is not current scope. Preserve world code and progression.
+
 ## Current scope override — 2026-11-27
 
 Alex explicitly paused overworld/campaign expansion. The active goal is futuristic Custom Castle Defense in Zillions style: first prove the core, then several distinct fun maps, with three documented polish passes. Preserve world/roster work on `codex/reference-integration-20261127` (checkpoint6decb54); do not resume without Alex. Earlier shared-world/Enter World navigation requirements below are historical and superseded for this core branch. Retain accounts/saves; do not delete user progression. Custom map play should be reachable directly without world travel or mandatory character creation.

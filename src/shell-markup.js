@@ -151,7 +151,8 @@ export function shellMarkup() {
       <div id="screen-account" class="shell-screen title-screen">
         <header class="title-identity"><span>THE FRONTIER AWAITS</span><h1>ZILLIONS</h1></header>
         <nav class="menu-list" aria-label="Title menu">
-          <button type="button" class="menu-word is-focus" id="a-play"><b>Play</b></button>
+          <button type="button" class="menu-word is-focus" id="a-play"><b>Custom Games</b></button>
+          <button type="button" class="menu-word world-paused" id="a-world" disabled title="Overworld is paused">Enter World</button>
           <button type="button" class="menu-word" id="nav-squad">Multiplayer</button>
           <button type="button" class="menu-word" id="nav-armory">Armory</button>
           <button type="button" class="menu-word" id="a-settings">Settings</button>
@@ -199,7 +200,7 @@ export function shellMarkup() {
           <div id="character-list" class="character-cards"></div>
           <button type="button" class="character-card new-card" id="m-create-character">+ Create Character</button>
           <button type="button" class="menu-word" id="nav-home">Play a Map</button>
-          <button type="button" class="menubtn custom-entry" id="leader-custom">Custom Battles</button><button type="button" class="character-sheet-open danger" id="m-delete-character">RETIRE LEGACY CHARACTER</button>
+          <button type="button" class="menubtn custom-entry" id="leader-custom">Custom Games</button><button type="button" class="character-sheet-open danger" id="m-delete-character">RETIRE LEGACY CHARACTER</button>
           <div id="first-hour-guide" class="first-hour-guide hidden" role="status"></div>
         </aside>
         <div class="leader-links"><button type="button" id="leader-back">Back</button><button type="button" id="leader-faction" aria-controls="chapter-identity" aria-expanded="false">Affiliation</button></div>
@@ -209,7 +210,7 @@ export function shellMarkup() {
       <div id="screen-home" class="shell-screen hidden">
         <div class="play-panels">
           <div data-panel="campaign" class="play-panel">
-            <article class="mode-card" data-mode="campaign">${icon('campaign')}<b>Enter the Overworld</b><p>Your first world. Choose a campaign site to deploy.</p><small>1</small><button type="button" class="menu-word" id="m-enter-world">Enter</button></article>
+            <article class="mode-card" data-mode="campaign">${icon('campaign')}<b>Enter the Overworld</b><p>Overworld is paused. Play a custom scenario.</p><small>1</small><button type="button" class="menu-word" id="m-enter-world" disabled title="Overworld is paused">Enter World</button></article>
           </div>
           <div data-panel="coop" class="play-panel hidden mode-grid">
             <article class="mode-card" data-mode="survival">${icon('coop')}<b>Survival</b><p>One city. Threat never stops.</p><small>1–4</small><div id="solo-survival-resume" class="moderesume"></div><button type="button" class="menu-word" id="solo-survival">Play</button></article>

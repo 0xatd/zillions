@@ -1178,3 +1178,6 @@ button:disabled {cursor:not-allowed;}
  #screen-setup.custom-map-setup .herocard .hface{width:58px;height:58px;}
  #screen-setup.custom-map-setup .herocard small{display:none;}
 }
+
+/* Paused world entry stays visible, but is never an active play path. */
+.menu-word.world-paused:disabled, #m-enter-world:disabled {color:#7d8289;opacity:.5;filter:grayscale(1);text-shadow:none;cursor:not-allowed;}

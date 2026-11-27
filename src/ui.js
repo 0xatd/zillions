@@ -189,7 +189,7 @@ export class UI {
     this._submitOnEnter('#cu-name', () => q('#cu-confirm').click());
     this._submitOnEnter('#q-chapter', () => q('#quick-form').requestSubmit());
     this._submitOnEnter('#q-founder', () => q('#quick-form').requestSubmit());
-    q('#m-enter-world').onclick = () => this.cb.onCampaignMap && this.cb.onCampaignMap();
+    q('#m-enter-world').onclick = () => {};
     q('#m-create-character').onclick = () => this.showCharacterCreator();
     q('#chapter-identity').onsubmit = e => { e.preventDefault(); this._busy(e.submitter); this.cb.onChapterSave?.({name:q('#chapter-name-input').value,color:q('#chapter-color').value,emblem:q('#chapter-emblem').value,culture:q('#chapter-culture').value}); };
     q('#chapter-culture').innerHTML=Object.entries(CHAPTER_CULTURES).map(([k,v])=>`<option value="${k}">${v.name} — ${v.desc}</option>`).join('');
@@ -1190,9 +1190,9 @@ export class UI {
       b.onclick=()=>this.cb.onCharacterSelect?.(c.id);list.appendChild(b);
     }
     if (!characters.length) { const empty=document.createElement('p');empty.textContent='Your story starts with a leader.';list.appendChild(empty); }
-    this.root.querySelector('#nav-home').disabled=!characters.length;
+    this.root.querySelector('#nav-home').disabled=false;
     list.classList.remove('empty');
-    this.root.querySelector('#m-enter-world').disabled=!characters.length;
+    this.root.querySelector('#m-enter-world').disabled=true;
     const create=this.root.querySelector('#m-create-character');
     create.disabled=characters.length>=CHAPTER_ROSTER_LIMIT;
     create.textContent=create.disabled?'Roster full':'+ Create Character';

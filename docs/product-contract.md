@@ -1,3 +1,8 @@
+
+## Custom Games-only direction — Alex, 2026-11-27 21:15 UTC
+
+Enter World stays gray and disabled. Custom Games is the only active play/development path. Start with the existing maps; then attempt to rebuild the Custom Castle Defense reference map in Three.js. Good, approved standalone scenarios may eventually be reused in the overworld; that integration is not current scope. Preserve world code and progression.
+
 # Zillions Product Contract
 
 ## Social and Custom Battles (Alex, 2026-11-26)

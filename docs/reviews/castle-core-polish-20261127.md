@@ -4,7 +4,7 @@
 
 Core checkout: `/tmp/zillions-castle-core-20261127`, branch `codex/castle-core-20261127`, base `8ba5ee1`.
 Strategic work remains unchanged at `/tmp/zillions-reference-integration-20261127`, checkpoint `6decb54`.
-The latest supplied goal string includes that strategic scope, while the active goal and Alex's explicit direction pause it. Scope clarification is pending. This checkpoint improves the existing core; it does not claim the larger integration finished.
+The latest supplied goal string includes that strategic scope, while the active goal and Alex's explicit direction pause it. Alex has now confirmed Custom Games only: existing maps first, then attempt the reference Custom Castle Defense map in Three.js. This checkpoint improves the existing core; it does not claim the larger integration finished.
 
 ## Pass 1 — gameplay and correctness
 
@@ -31,7 +31,7 @@ Final check/build/journey/transport receipts are recorded below when settled. A 
 
 ## Remaining acceptance work
 
-- Resolve core-only versus restored strategic integration scope before packaging a single final PR.
+- Scope resolved: Custom Games only; world entry disabled, world work preserved.
 - Complete all touched-screen/error-state visual review and retained regression gates.
 - Run the authenticated candidate journey on isolated staging; do not substitute local fixtures.
 - Human assessment of core feel and representative hardware performance remain unproven.
