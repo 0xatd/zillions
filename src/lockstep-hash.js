@@ -13,6 +13,8 @@ import { EQUIP_SLOTS, MOD_KEYS, hashString } from './items.js';
 export function stateHash(g) {
   let h = 7;
   h = (h * 31 + hashString(g.stance || '')) | 0;
+  if (g.worldArmy?.length) h = (h*31 + hashString(JSON.stringify([g.worldArmy,g.expeditionLosses,g.worldArmyDeployed])))|0;
+  if (g.armyRally) h = (h * 31 + hashString(JSON.stringify(g.armyRally))) | 0;
   if (g.firstSiege) h = (h * 31 + hashString(JSON.stringify(g.firstSiege))) | 0;
   if(g.builders) h = (h * 31 + hashString(JSON.stringify(g.builders))) | 0;
   h = (h * 31 + Math.round(g.gold)) | 0;
@@ -30,6 +32,7 @@ export function stateHash(g) {
     }
   }
   for (const unit of g.units) if(!unit.hero && unit.spellBuffs) h=(h*31+hashString(JSON.stringify(unit.spellBuffs)))|0;
+  for (const unit of g.units) if(unit.expeditionOwner != null) h=(h*31+hashString(JSON.stringify([unit.id,unit.expeditionOwner,unit.hp])))|0;
   for (const hr of g.heroes) {
     if(hr.spellBuffs)h=(h*31+hashString(JSON.stringify(hr.spellBuffs)))|0;
     if (hr.spells) h = (h * 31 + hashString(JSON.stringify(hr.spells))) | 0;

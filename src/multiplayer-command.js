@@ -33,6 +33,8 @@ export function guestCommand(input, player, playerCount) {
       return axis(input.x) && axis(input.z) ? { ...command, x: input.x, z: input.z } : null;
     case 'pay':
       return typeof input.on === 'boolean' ? { ...command, on: input.on } : null;
+    case 'rally':
+      return Number.isFinite(input.x) && Number.isFinite(input.z) && input.x >= 0 && input.z >= 0 && input.x <= 512 && input.z <= 512 ? {...command,x:Math.round(input.x*64)/64,z:Math.round(input.z*64)/64} : null;
     case 'stance':
       return ['defend', 'guard', 'attack'].includes(input.s) ? { ...command, s: input.s } : null;
     case 'heroUpgrade':

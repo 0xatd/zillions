@@ -273,7 +273,8 @@ enemy attack-moves onto that enemy and shows a red marker.
 | 1, 2 | Consumable slots — reserved; Zillions has no flask system |
 | B | Build, upgrade, repair, or rebuild |
 | Alt | Switch between Build mode and Fight mode |
-| F1, F2, F3 | Set Defend, Follow, or Push stance |
+| F1, F2, F3, F4 | Army: Defend, Follow, Push, or choose Rally point |
+| F5, F6, F7, F8 | Workers: Develop, Maintain, Fortify, Expand |
 | T | Change the nearest tower target rule |
 | Z | Drop the newest field item |
 | C | Character and equipment screen |
@@ -293,7 +294,7 @@ Click/tap a unit to inspect it. An in-range enemy offers **Focus attacks**
 for your hero only; **Clear attack focus** restores automatic targeting.
 Inspection alone never changes orders. Use **Items** to read carried gear.
 
-Army stances take F1–F3 rather than the number row, so 1 and 2 stay reserved
+Army stances take F1–F4 rather than the number row, so 1 and 2 stay reserved
 for a future consumable system. Alt switches Build and Fight. In Build mode,
 V and B fund construction. In Fight mode, V dodges and Q, W, E, R cast.
 
@@ -458,3 +459,18 @@ Hero attacks wind up before release. Moving before release cancels the swing; mo
 The menu shell uses `src/nav/router.js`, `src/shell-markup.js` and
 `src/ui.js`. Existing characters enter the campaign; new characters use
 a separate guided creator. See [navigation boundaries](docs/leader-navigation.md).
+
+## Shared frontier preview
+
+The first space-system slice replaces the static campaign selector with travel,
+NPC and player fleets, arrival-only colony services, and encounters that return
+surviving expedition troops. Signed-in play needs the additive
+`20261127000100_shared_strategic_world.sql` migration and existing Supabase auth,
+service-role and match-ticket configuration. Static hosting offers explicitly
+local offline expeditions; it does not simulate online players.
+
+See [delivery and verification](docs/playability-and-shared-world.md) and
+[authority review / rollout limits](docs/world-authority-review.md). The realm
+is currently bounded, with a snapshot/CAS authority rather than a production
+large-population simulation service. Do not infer faction politics, assembled
+armies, or finished Bannerlord-scale gameplay from this initial slice.

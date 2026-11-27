@@ -14,14 +14,19 @@
 // A Vercel preview will stop the guest on Deployment Protection unless that
 // browser is already signed into the Vercel team. Production does not.
 import { createServer } from 'node:http';
-import { readFile, mkdir } from 'node:fs/promises';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { chromium } from 'playwright';
 
 const liveUrl = process.argv.find((arg, index) => process.argv[index - 1] === '--url') || '';
 const liveRealtime = process.argv.includes('--live-realtime');
+// Local fixture supplies only match metadata. It does not fake an API,
+// authenticate users, or establish signed-in shared-world integration.
+const worldArmyFixture = process.argv.includes('--world-army-fixture');
+if(worldArmyFixture && (liveUrl || liveRealtime))throw new Error('World army fixture is local-only');
 const profileRender = process.argv.includes('--profile-render');
 const profiledPages = [];
+const observedPages = [];
 const transportOnly = process.argv.includes('--transport-only');
 async function configureRender(page) {
   if (!transportOnly && !profileRender) return;
@@ -176,7 +181,7 @@ function watch(page, label) {
   const lines = [];
   page.on('pageerror', (error) => lines.push(`${label} error: ${error.message}`));
   page.on('console', (msg) => {
-    if (msg.type() === 'error') lines.push(`${label} console: ${msg.text()}`);
+    if (msg.type() === 'error' || msg.type() === 'warning') lines.push(`${label} console: ${msg.text()}`);
   });
   return lines;
 }
@@ -193,8 +198,9 @@ async function context(label) {
     };
   }, mailbox?.url || '');
   const page = await ctx.newPage();
-  page.setDefaultTimeout(30000);
+  page.setDefaultTimeout(worldArmyFixture ? 80000 : 30000);
   const notes = watch(page, label);
+  observedPages.push({page,label,notes});
   return { ctx, page, notes };
 }
 
@@ -203,7 +209,9 @@ async function dump(page, notes) {
   const start = await page.locator('#s-start').textContent().catch(() => '');
   const seat = await page.locator('.roomslot.host small').textContent().catch(() => '');
   const waiting = await page.locator('#waitind').textContent().catch(() => '');
-  return { url: page.url(), status, start, seat, waiting, notes };
+  const phase=await page.locator('#deployment-phase').textContent().catch(()=>'');
+  const probe=await page.evaluate(()=>({runtime:globalThis.__zillionsProbe?.(),preparing:__app?._preparingBattlefield,world:__app?._match?.world,army:__app?.game?.worldArmy})).catch(()=>null);
+  return { url: page.url(), status, start, seat, waiting, phase, probe, notes };
 }
 
 try {
@@ -211,6 +219,15 @@ try {
   const host = await context('host');
   await host.page.goto(origin + '/', { waitUntil: 'domcontentloaded' });
   await configureRender(host.page);
+  if(!await host.page.locator('#a-invite').isVisible()){
+    await host.page.locator('#a-play').click();
+    if(await host.page.locator('#creator-next').isVisible()){
+      for(let step=0;step<5;step++)await host.page.locator('#creator-next').click();
+      await host.page.locator('#creator-name').fill('Coop Pilot');
+      await host.page.locator('#creator-submit').click();
+    }
+    await host.page.locator('#nav-home').click();
+  }
   await host.page.locator('#a-invite').click();
   await host.page.locator('#share-url').waitFor({ state: 'visible' });
   const invite = await host.page.locator('#share-url').inputValue();
@@ -219,7 +236,7 @@ try {
   if (!address.includes('coop=')) throw new Error(`address bar lost the room: ${address}`);
   const code = new URL(invite).searchParams.get('coop');
   await host.page.reload({ waitUntil: 'domcontentloaded' });
-  await host.page.locator('#share-url').waitFor({ state: 'visible', timeout: 20000 });
+  await host.page.locator('#share-url').waitFor({ state: 'visible', timeout: worldArmyFixture ? 80000 : 20000 });
   await configureRender(host.page);
   const afterRefresh = host.page.url();
   const refreshedInvite = await host.page.locator('#share-url').inputValue();
@@ -229,10 +246,11 @@ try {
   const guestUrl = new URL(refreshedInvite);
   const guestTarget = liveUrl ? refreshedInvite : `${origin}${guestUrl.pathname}${guestUrl.search}`;
 
+  console.log('co-op: host invite survived refresh; opening guest');
   const guest = await context('guest');
   await guest.page.goto(guestTarget, { waitUntil: 'domcontentloaded' });
   await configureRender(guest.page);
-  await guest.page.getByText(/You're in as /).waitFor({ timeout: 20000 }).catch(async (error) => {
+  await guest.page.getByText(/You're in as /).waitFor({ timeout: worldArmyFixture ? 80000 : 20000 }).catch(async (error) => {
     const body = await guest.page.locator('body').innerText().catch(() => '');
     throw new Error(`${error.message}\nGUEST BODY:\n${body.slice(0, 1500)}\n${JSON.stringify({ host: await dump(host.page, host.notes), guest: await dump(guest.page, guest.notes) }, null, 2)}`);
   });
@@ -244,7 +262,7 @@ try {
   await host.page.waitForFunction(() => {
     const roster = globalThis.__zillionsProbe?.()?.roster || [];
     return roster.filter((seat) => !seat.host).length === 1;
-  }, null, { timeout: 20000 }).catch(async (error) => {
+  }, null, { timeout: worldArmyFixture ? 80000 : 20000 }).catch(async (error) => {
     throw new Error(`${error.message} host=${JSON.stringify(await dump(host.page, host.notes))} guest=${JSON.stringify(await dump(guest.page, guest.notes))}`);
   });
   await guest.page.locator('#share-ready').click();
@@ -269,7 +287,7 @@ try {
       && button && !button.disabled
       && /START/i.test(button.textContent || '')
       && !/WAITING/i.test(button.textContent || ''));
-  }, null, { timeout: 20000 }).catch(async (error) => {
+  }, null, { timeout: worldArmyFixture ? 80000 : 20000 }).catch(async (error) => {
     const line = await host.page.locator('.roomslot:not(.host):not(.open)').innerText().catch(() => '');
     throw new Error(`${error.message}\n${line}\n${JSON.stringify((await probe(host.page))?.roster)}`);
   });
@@ -337,6 +355,10 @@ try {
   }, null, { timeout: 45000 }).catch(async (error) => {
     throw new Error(`${error.message} host=${JSON.stringify(await dump(host.page, host.notes))} guest=${JSON.stringify(await dump(guest.page, guest.notes))}`);
   });
+  if(worldArmyFixture){
+    await host.page.evaluate(()=>{window.__app._requestMatchTicket=async()=>({ok:true,ticket:null,seed:774488,roomId:null,world:{encounter:'qa-metadata-only',troops:5,army:[5,7]}});});
+    console.log('co-op: LOCAL METADATA FIXTURE [5,7]; not a signed-in world/API end-to-end test');
+  }
   await host.page.locator('#s-start').click();
   await host.page.locator('#screen-setup').waitFor({ state: 'hidden', timeout: 90000 }).catch(async(error)=>{ throw new Error(`${error.message} host=${JSON.stringify(await dump(host.page,host.notes))} guest=${JSON.stringify(await dump(guest.page,guest.notes))}`); });
   await guest.page.locator('#screen-setup').waitFor({ state: 'hidden', timeout: 90000 });
@@ -359,6 +381,26 @@ try {
     throw new Error(`sims did not tick together ${JSON.stringify(last)} host=${JSON.stringify(await dump(host.page, host.notes))} guest=${JSON.stringify(await dump(guest.page, guest.notes))}`);
   }
   console.log('co-op: both simulations running');
+  const verifyWorldArmy=async(stage)=>{
+    if(!worldArmyFixture)return;
+    const end=Date.now()+90000;let evidence=null;
+    while(Date.now()<end){
+      const read=page=>page.evaluate(()=>({army:__app.game?.worldArmy,deployed:__app.game?.worldArmyDeployed,world:__app._match?.world,hashes:__app._hashLog||[],frame:__app.simFrame,frameError:__app._frameError?.message||null}));
+      const h=await read(host.page),g=await read(guest.page);
+      if(h.frameError||g.frameError)throw new Error(`world army frame error ${JSON.stringify({h,g})}`);
+      const common=h.hashes.filter(([frame])=>g.hashes.some(([other])=>frame===other));
+      const mismatches=common.filter(([frame,hash])=>g.hashes.find(([other])=>frame===other)[1]!==hash);
+      if(mismatches.length)throw new Error(`world army hashes diverged ${JSON.stringify(mismatches)}`);
+      evidence={stage,fixture:'local match metadata only; no signed-in API',host:h,guest:g,agreedFrames:common.map(([frame])=>frame)};
+      if(h.deployed && g.deployed && common.length>=3)break;
+      await new Promise(resolve=>setTimeout(resolve,500));
+    }
+    if(JSON.stringify(evidence?.host.army)!=='[5,7]'||JSON.stringify(evidence?.guest.army)!=='[5,7]'||evidence?.host.world?.encounter!=='qa-metadata-only'||evidence?.guest.world?.encounter!=='qa-metadata-only'||evidence.agreedFrames.length<3)throw new Error(`world army handoff failed ${JSON.stringify(evidence)}`);
+    console.log(`co-op world fixture ${stage}: army [5,7] and encounter metadata preserved; ${evidence.agreedFrames.length} identical sampled hashes`);
+    if(process.env.ZILLIONS_COOP_QA_DIR){await mkdir(process.env.ZILLIONS_COOP_QA_DIR,{recursive:true});await writeFile(join(process.env.ZILLIONS_COOP_QA_DIR,`world-${stage}.json`),JSON.stringify(evidence,null,2));}
+  };
+  if(worldArmyFixture){await host.page.evaluate(()=>{if(__app.game.phase==='found')__app.issue({t:'found',s:0,p:0});});await verifyWorldArmy('startup');}
+
   if (process.env.ZILLIONS_COOP_QA_DIR) {
     await mkdir(process.env.ZILLIONS_COOP_QA_DIR, {recursive:true});
     await host.page.screenshot({path:join(process.env.ZILLIONS_COOP_QA_DIR,'host-battlefield.png')});
@@ -452,6 +494,7 @@ try {
     throw new Error(`guest did not rejoin the running sim ${JSON.stringify(lastRejoin)}\nGUEST:\n${body.slice(0, 800)}`);
   }
   console.log(`co-op: reload recovered in ${120000 - (rejoinDeadline - Date.now())}ms after page load; frame gap ${Math.abs(rejoined.hostProbe.frame - rejoined.guestProbe.frame)}`);
+  await verifyWorldArmy('reload');
   await host.page.reload({ waitUntil: 'domcontentloaded' });
   await host.page.waitForFunction(() => window.__app && window.__app.mpRole === null && !window.__app._shareCode, null, { timeout: 30000 });
   const closed = await host.page.evaluate((code) => JSON.parse(localStorage.getItem(`zillions.share.${code}`))?.lobby?.closed, code);
@@ -461,6 +504,16 @@ try {
   const via = liveUrl ? 'the live URL' : liveRealtime ? 'production Supabase Realtime' : 'the in-process relay';
   console.log(`${process.argv.includes('--startup-only') ? 'coop startup diagnostic' : 'coop e2e'} passed against ${via} with WebRTC blocked${transportOnly ? ' (transport isolation: GPU draws disabled)' : ''}`);
   }
+} catch(error) {
+  if(process.env.ZILLIONS_COOP_QA_DIR){
+    await mkdir(process.env.ZILLIONS_COOP_QA_DIR,{recursive:true});
+    for(const {page,label,notes} of observedPages){
+      if(page.isClosed())continue;
+      await writeFile(join(process.env.ZILLIONS_COOP_QA_DIR,`${label}-failure.json`),JSON.stringify(await dump(page,notes),null,2)).catch(()=>{});
+      await page.screenshot({path:join(process.env.ZILLIONS_COOP_QA_DIR,`${label}-failure.png`)}).catch(()=>{});
+    }
+  }
+  throw error;
 } finally {
   for (const page of profiledPages) {
     const report=await page.evaluate(()=>{

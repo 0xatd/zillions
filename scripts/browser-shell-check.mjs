@@ -128,10 +128,13 @@ try {
     app.ui.showCharacterCreator();
     await app._createMmoCharacter({name:'Journey Test',appearance:'iron',raceKey:'human'});
     const selected = !document.querySelector('#screen-main').classList.contains('hidden');
-    document.querySelector('#chapter-next').click();
-    const choices=[...document.querySelectorAll('#herorow .herocard')].filter(c=>!c.classList.contains('hidden'));
-    return founderScreen && canResumeFounder && selected && !document.querySelector('#screen-setup').classList.contains('hidden') && choices.length===1 && choices[0].querySelector('b').textContent==='Journey Test' && !app.ow && !app.owMap;
-  })()`), true, 'new account creates a chapter and founder, then deploys straight to its first conquest');
+    document.querySelector('#m-enter-world').click();
+    for(let i=0;i<100 && !app.strategicMap?.view?.self;i++)await new Promise(r=>setTimeout(r,50));
+    const world=app.strategicMap;
+    return founderScreen && canResumeFounder && selected && world?.active && !!world.self()
+      && !document.querySelector('#screen-overworld').classList.contains('hidden')
+      && !!document.querySelector('.strategic-canvas') && !app.ow && !app.owMap;
+  })()`), true, 'new account creates its founder and enters the persistent strategic map');
   await evaluate("window.__app.ui._showScreen('character-create')");
   for (const [width, height] of [[390, 844], [844, 390], [1366, 768]]) {
     await command('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
@@ -195,7 +198,7 @@ try {
     app.ui._showScreen('help');
     document.querySelector('#h-back').click();
     return noWorld && characterCustom && !document.querySelector('#screen-main').classList.contains('hidden');
-  })()`), true, 'the living world is gone: no overworld HUD or world map, Custom Games stays on Character Select, and Help closes back to it');
+  })()`), true, 'retired legacy-world DOM stays removed; Custom Games stays on Character Select and Help closes back to it');
   assert.equal(await evaluate(`(() => {
     const app = window.__app;
     app.ui._customFrom = 'main';
@@ -224,20 +227,56 @@ try {
       && !canvas.classList.contains('hidden') && name.textContent.includes('Journey Test')
       && !document.querySelector('#m-enter-world').disabled;
   })()`), true, 'Character Select must render the selected gameplay model with its name and usable Deploy action');
-  // Deployment and navigation must be visible, not merely free of overflow.
+  // World navigation is a moving map, not the retired chapter mission picker.
   for (const [width, height] of [[390, 844], [844, 390], [1200, 655]]) {
     await command('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
-    assert.equal(await evaluate(`(() => {
-      window.__app.ui.showOverworld();
-      const screen = document.querySelector('#screen-overworld');
-      screen.scrollTop = 0;
-      return ['#chapter-map', '#chapter-next'].every(selector => {
-        const button = document.querySelector(selector), r = button.getBoundingClientRect();
-        return !button.disabled && r.width > 30 && r.height >= 28 && r.top >= 0
-          && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth;
+    assert.equal(await evaluate(`(async () => {
+      const app=__app;app.ui.showOverworld();
+      for(let i=0;i<100 && (!app.strategicMap?.view?.self || app.strategicMap.busy);i++)await new Promise(r=>setTimeout(r,50));
+      const world=app.strategicMap;world.draw();
+      return world.active && world.offline && !!world.self() && ['.strategic-canvas','#world-back','.strategic-controls'].every(selector=>{
+        const control=document.querySelector(selector),r=control.getBoundingClientRect();
+        return !control.disabled && r.width>30 && r.height>=28 && r.top>=0 && r.bottom<=innerHeight && r.left>=0 && r.right<=innerWidth;
       });
-    })()`), true, `Chapter map and primary deployment must fit above the fold at ${width}x${height}`);
+    })()`), true, `Strategic map and navigation controls fit above the fold at ${width}x${height}`);
   }
+  // Real canvas click changes a destination; authority time then moves the
+  // saved fleet, and the colony offers services only once it arrives.
+  await command('Emulation.setDeviceMetricsOverride', { width: 1200, height: 655, deviceScaleFactor: 1, mobile: false });
+  const destination=await evaluate(`(()=>{
+    const w=__app.strategicMap;w.camera={x:300,z:350,zoom:1.3};w.draw();
+    const p=w.point({x:220,z:350}),r=w.canvas.getBoundingClientRect();return {x:r.left+p.x,y:r.top+p.y,before:w.self().x};
+  })()`);
+  const click=async(x,y)=>{await command('Input.dispatchMouseEvent',{type:'mousePressed',x,y,button:'left',clickCount:1});await command('Input.dispatchMouseEvent',{type:'mouseReleased',x,y,button:'left',clickCount:1});};
+  await click(destination.x,destination.y);
+  assert.equal(await evaluate(`(async()=>{
+    const w=__app.strategicMap;for(let i=0;i<100 && w.busy;i++)await new Promise(r=>setTimeout(r,50));
+    const target=w.self()?.target;return !!target&&Math.abs(target.x-220)<2&&Math.abs(target.z-350)<2;
+  })()`),true,'clicking open space commits the chosen travel destination');
+  await delay(650);
+  assert.equal(await evaluate(`(async()=>{const w=__app.strategicMap;while(w.busy)await new Promise(r=>setTimeout(r,25));await w.send('snapshot');return w.self().x>${destination.before}+5;})()`),true,'fleet position advances on authority time instead of teleporting');
+  // Select Greenfall through the canvas hit test, then use its Travel action.
+  const colony=await evaluate(`(()=>{const w=__app.strategicMap,p=w.point(w.view.ports[0]),r=w.canvas.getBoundingClientRect();return {x:r.left+p.x+24,y:r.top+p.y};})()`);
+  await click(colony.x,colony.y);
+  assert.equal(await evaluate(`(()=>{const w=__app.strategicMap;return w.selected?.type==='port'&&w.selected.id==='greenfall'&&!document.querySelector('.strategic-panel').textContent.includes('Launch siege');})()`),true,'travelling fleet cannot use colony services remotely');
+  await evaluate(`(()=>{const b=[...document.querySelectorAll('.strategic-panel button')].find(b=>b.textContent==='Travel to Greenfall');if(!b)throw Error('missing colony travel action');b.click();})()`);
+  assert.equal(await evaluate(`(async()=>{
+    const w=__app.strategicMap;for(let i=0;i<120;i++){if(!w.busy)await w.send('snapshot');if(!w.self().target&&Math.hypot(w.self().x-160,w.self().z-350)<1)break;await new Promise(r=>setTimeout(r,50));}
+    return !w.self().target && [...document.querySelectorAll('.strategic-panel button')].some(b=>b.textContent==='Launch siege'&&!b.disabled);
+  })()`),true,'arrival reveals colony siege and service actions');
+  if(process.env.ZILLIONS_WORLD_QA_DIR){
+    const shot=await command('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});
+    await writeFile(join(process.env.ZILLIONS_WORLD_QA_DIR,'strategic-arrival-shell.png'),Buffer.from(shot.result.data,'base64'));
+  }
+  assert.equal(await evaluate(`(async()=>{
+    const w=__app.strategicMap;[...document.querySelectorAll('.strategic-panel button')].find(b=>b.textContent==='Launch siege').click();
+    for(let i=0;i<100&&w.busy;i++)await new Promise(r=>setTimeout(r,50));
+    const prepare=[...document.querySelectorAll('.strategic-panel button')].find(b=>b.textContent==='Prepare battle');if(!prepare)return false;prepare.click();
+    for(let i=0;i<100&&w.busy;i++)await new Promise(r=>setTimeout(r,50));
+    const choices=[...document.querySelectorAll('#herorow .herocard')].filter(c=>!c.classList.contains('hidden'));
+    const valid=!document.querySelector('#screen-setup').classList.contains('hidden')&&choices.length===1&&choices[0].querySelector('b').textContent==='Journey Test';
+    await w.send('retreat');return valid;
+  })()`),true,'colony encounter prepares the selected founder, not an arbitrary hero or site');
   await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   assert.equal(await evaluate(`(() => {
     const ui = window.__app.ui;
@@ -416,14 +455,14 @@ try {
     const ui = window.__app.ui;
     const stats = { kills: 10, built: 2, lost: 0, coins: 50, nests: 0, nodes: 0, bestHeld: 0, heroDeaths: 0, bossKillT: null };
     ui.showEnd(true, stats, 3, 1, 'campaign', 0, { heroName: 'Journey Test', level: 1, pending: true, grants: [], quests: [] }, null);
-    const pending = /Reporting the siege/.test(document.querySelector('#end-rewards').textContent) && document.querySelector('#end-unlock').classList.contains('hidden');
+    const pending = /Saving battle rewards/.test(document.querySelector('#end-rewards').textContent) && document.querySelector('#end-unlock').classList.contains('hidden');
     ui.setEndRewards({ heroName: 'Journey Test', level: 2, xp: 300, levels: [2], alloy: 12, grants: ['targeting_optic'], skipped: [{ key: 'x', reason: 'stash_full' }],
       saved:true,campaignCleared:1, quests: [{ id: 'l1q1', name: 'First Blood', desc: 'Slay 150', reward: 'targeting_optic', done: true }], pending: false });
     const text = document.querySelector('#end-rewards').textContent;
-    const granted = !document.querySelector('#end-unlock').classList.contains('hidden') && /level 2/.test(text) && text.includes('+300 XP') && text.includes('+12') && /First Blood/.test(text) && /Stash full/.test(text) && !/Reporting/.test(text);
+    const granted = !document.querySelector('#end-unlock').classList.contains('hidden') && /level 2/.test(text) && text.includes('+300 XP') && text.includes('+12') && /First Blood/.test(text) && /Stash full/.test(text) && !/Saving battle/.test(text);
     ui.setEndRewards({ pending: false, error: 'Command rejected this report (level_locked). No rewards were granted.', grants: [], quests: [] });
     const rejected = document.querySelector('#end-unlock').classList.contains('hidden') && /No rewards were granted/.test(document.querySelector('#end-rewards').textContent);
-    const back = document.querySelector('#b-restart').textContent === 'Return to missions';
+    const back = document.querySelector('#b-restart').textContent === 'Return to world';
     return pending && granted && rejected && back;
   })()`), true, 'the end screen must show pending, then exactly the server-granted rewards (or the rejection)');
   assert.equal(await evaluate(`(async () => {

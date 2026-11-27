@@ -102,7 +102,7 @@ export const MODES = Object.freeze([
 
 export const PLAY_TABS = Object.freeze([
   { id: 'campaign', name: 'Campaign' },
-  { id: 'coop', name: 'Co-op' },
+  { id: 'coop', name: 'Other battles' },
   { id: 'versus', name: 'Versus' },
   { id: 'custom', name: 'Custom' },
 ]);

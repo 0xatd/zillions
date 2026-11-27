@@ -56,6 +56,7 @@ export function supabaseTicketStore({ url, serviceKey, fetchImpl = fetch }) {
     createManualRoom: (args) => rpc('create_manual_coop_room', args),
     seatManualPlayer: (args) => rpc('seat_manual_coop_player', args),
     issueTicket: (args) => rpc('issue_match_ticket', args),
+    linkWorld: args => rpc('strategic_link_match', args),
   };
 }
 
@@ -90,20 +91,27 @@ export async function processMatchStart({ userId, body, store, secret = ticketSe
   }
 
   const seed = roomId ? roomSeed(roomId, secret) : soloSeed();
-  const row = await store.issueTicket({
+  let row = await store.issueTicket({
     p_actor: userId, p_client_character_id: characterId, p_level_id: levelId, p_mode: mode,
     p_difficulty: difficulty, p_seed: seed, p_room_id: roomId, p_ttl_seconds: TICKET_TTL_SECONDS,
   });
   if (!row?.id) throw httpError('match_start_failed', 503);
+  const linked = body.worldEncounter ? await store.linkWorld({p_actor:userId,p_character:characterId,p_encounter:cleanText(body.worldEncounter,96),p_ticket:row.id}) : null;
+  if (linked?.ticket) {
+    if (linked.ticket.difficulty!==difficulty || (linked.ticket.room_id||null)!==(roomId||null) || linked.ticket.level_id!==levelId) throw httpError('world_setup_locked',409);
+    row = linked.ticket;
+  }
+  const world = linked ? {encounter:linked.encounter,troops:linked.troops,army:linked.army||[linked.troops]} : null;
   const iat = Math.floor(Date.parse(row.issued_at) / 1000);
   const exp = Math.floor(Date.parse(row.expires_at) / 1000);
   if (!Number.isFinite(iat) || !Number.isFinite(exp) || exp * 1000 <= now) throw httpError('match_start_failed', 503);
   const ticketSeed = Number(row.seed);
   const ticket = signTicket({
-    tid: row.id, uid: userId, lvl: levelId, mode, diff: difficulty, seed: ticketSeed, rid: roomId || null, iat, exp,
+    tid: row.id, uid: userId, lvl: levelId, mode, diff: difficulty, seed: ticketSeed, rid: roomId || null, iat, exp, ...(world ? {world} : {}),
   }, secret);
   return {
     ok: true, ticket, ticketId: row.id, seed: ticketSeed, roomId: roomId || null,
+    ...(world ? {world} : {}),
     ...(token ? { joinToken: token } : {}), expiresAt: row.expires_at,
   };
 }

@@ -23,10 +23,10 @@ export function shellMarkup() {
       <div class="res gold" id="r-gold" title="Gold — income is paid automatically, coins drop from fighting. Hold your Build key at a foundation to spend"><b>0</b></div>
       <div class="res" id="r-day" title="Threat — rises with the clock, with every hive still standing, and with every node you take"><b>Threat 1</b></div>
       <div class="res" id="r-front" title="Lane nodes you hold · hive nests still mustering"><b>0</b> · <b>0</b></div>
-      <div class="res" id="r-z" title="Enemies remaining">0</div>
+      <div class="res" id="r-army" title="Living troops in your shared army">Troops 0</div><div class="res" id="r-z" title="Enemies currently in allied sight">Visible 0</div>
       <div class="netdiag hidden" id="netdiag" title="Live multiplayer route, latency, jitter buffer, and device frame rate"></div>
       <div class="sep"></div>
-      <button class="tbtn" id="b-pause" title="Pause (P)">II</button>
+      <button class="tbtn" id="b-pause" title="Pause (P)">Pause</button>
       <span class="speed-readout" id="speed-readout">1×</span>
       <button class="tbtn speed" data-s="1">1×</button>
       <button class="tbtn speed" data-s="2">2×</button>
@@ -46,25 +46,15 @@ export function shellMarkup() {
     </aside>
     <div id="banner"></div>
     <div id="invitetoast" class="hidden"></div>
-    <div id="waitind" class="hidden">Syncing co-op…</div>
+    <div id="waitind" class="hidden">Syncing battle…</div>
     <div id="bossbar" class="hidden"><b id="boss-name"></b><div class="bossfillwrap"><div id="boss-fill"></div></div></div>
     <div id="combat-alert" class="combat-alert hidden" role="status" aria-live="polite"></div>
     <div id="wave-approach" class="wave-approach hidden" aria-hidden="true"><b>➤</b><small></small></div>
-    <div id="messages"></div>
+    <div id="messages"></div><nav id="combat-locations" class="hidden" aria-label="Active battles"></nav>
     <aside id="battle-details" class="battle-details hidden" aria-label="Battlefield details">
       <button id="battle-details-close" aria-label="Close details">×</button>
       <div id="battle-details-content"></div>
     </aside>
-    <section id="builder-controls" class="builder-controls hidden" aria-label="Builder orders">
-      <button id="builder-toggle" aria-expanded="false">Builders</button><span id="builder-status"></span>
-      <div id="builder-options" class="hidden">
-        <label>Order <select id="builder-order">${Object.entries(BUILDER_ORDERS).map(([key, name]) => `<option value="${key}">${name}</option>`).join('')}</select></label>
-        <button id="builder-pause">Resume</button>
-        <label>Keep gold <input id="builder-reserve" type="number" min="0" max="1000" step="5" value="10"></label>
-        <label>Towers <select id="builder-tower"><option value="ask">Ask me</option><option value="ballista">Long range</option><option value="flame">Anti-horde</option></select></label>
-        <label>Walls <select id="builder-wall"><option value="ask">Ask me</option><option value="bastion">Armor</option><option value="shock">Shock</option></select></label><p id="builder-help"></p>
-      </div>
-    </section>
     <div id="gamechat" class="gamechat hidden">
       <div class="gamechatlog" id="gamechat-log"></div>
       <div class="gamechatrow hidden" id="gamechat-row">
@@ -73,13 +63,15 @@ export function shellMarkup() {
       </div>
     </div>
 
+    <div id="command-deck" aria-label="Battle commands">
+    <div id="minimap-wrap" class="hidden">
+      <canvas id="minimap-base"></canvas>
+      <canvas id="minimap-top"></canvas>
+    </div>
     <div id="actionbar" class="hidden">
       <div class="commandtop">
-        <div class="rallyhints" id="stancebar">
-          <button type="button" class="stance" data-st="defend" data-bind="stance_defend" aria-pressed="false" title="Recall all squads to defend the Keep"><b></b> Defend Keep</button><button type="button" class="stance" data-st="guard" data-bind="stance_follow" aria-pressed="false" title="All squads escort the heroes; they leave the Keep"><b></b> Follow heroes</button><button type="button" class="stance" data-st="attack" data-bind="stance_push" aria-pressed="false" title="All squads push the lanes: take nodes, then siege the hives"><b></b> Push lanes</button>
-        </div>
         <button class="mode-toggle build" id="mode-toggle" title="Switch between Build and Fight controls"><b data-bind-label="build_mode"></b><span>Build mode</span></button>
-        <div class="armystatus" id="army-status">Build camps to raise squads.</div>
+
       </div>
       <div class="actionmain">
         <div id="heroplate">
@@ -103,9 +95,27 @@ export function shellMarkup() {
       <div id="buildhint" class="hidden"></div>
     </div>
 
-    <div id="minimap-wrap" class="hidden">
-      <canvas id="minimap-base"></canvas>
-      <canvas id="minimap-top"></canvas>
+    <aside id="command-orders" aria-label="Army and workers">
+        <div class="armystatus" id="army-status">Build camps to raise squads.</div>
+        <div class="rallyhints" id="stancebar">
+          <button type="button" class="stance" data-st="defend" data-bind="stance_defend" aria-pressed="false" title="Recall all squads to defend the Keep"><b></b> Defend</button><button type="button" class="stance" data-st="guard" data-bind="stance_follow" aria-pressed="false" title="All squads escort the heroes; they leave the Keep"><b></b> Follow</button><button type="button" class="stance" data-st="attack" data-bind="stance_push" aria-pressed="false" title="All squads push the lanes: take nodes, then siege the hives"><b></b> Push</button><button type="button" class="stance" data-st="rally" data-bind="stance_rally" aria-pressed="false" title="Choose a point for the army to hold"><b></b> Rally</button>
+        </div>
+    <section id="builder-controls" class="builder-controls hidden" aria-label="Builder orders">
+      <button id="builder-toggle" aria-expanded="false">Builders</button><span id="builder-status"></span>
+      <div class="worker-orders">
+        <button type="button" data-worker="develop" data-bind="workers_develop"><b></b> Develop</button>
+        <button type="button" data-worker="maintain" data-bind="workers_maintain"><b></b> Maintain</button>
+        <button type="button" data-worker="fortify" data-bind="workers_fortify"><b></b> Fortify</button>
+        <button type="button" data-worker="expand" data-bind="workers_expand"><b></b> Expand</button>
+      </div><div id="builder-options" class="hidden">
+        <label>Order <select id="builder-order">${Object.entries(BUILDER_ORDERS).map(([key, name]) => `<option value="${key}">${name}</option>`).join('')}</select></label>
+        <button id="builder-pause">Resume</button>
+        <label>Keep gold <input id="builder-reserve" type="number" min="0" max="1000" step="5" value="10"></label>
+        <label>Towers <select id="builder-tower"><option value="ask">Ask me</option><option value="ballista">Long range</option><option value="flame">Anti-horde</option></select></label>
+        <label>Walls <select id="builder-wall"><option value="ask">Ask me</option><option value="bastion">Armor</option><option value="shock">Shock</option></select></label><p id="builder-help"></p>
+      </div>
+    </section>
+    </aside>
     </div>
     <div id="tooltip" class="hidden"></div>
 
@@ -132,13 +142,14 @@ export function shellMarkup() {
         </div>
         <nav id="shell-tabs" class="shell-tabs hidden" aria-label="Play">
           <button type="button" data-tab="campaign" id="tab-campaign">Campaign</button>
-          <button type="button" data-tab="coop" id="tab-coop">Co-op</button>
+          <button type="button" data-tab="coop" id="tab-coop" class="hidden" hidden>Other battles</button>
           <button type="button" data-tab="versus" id="tab-versus">Versus</button>
           <button type="button" data-tab="custom" id="m-custom">Custom</button>
         </nav>
       </div>
 
       <div id="screen-account" class="shell-screen title-screen">
+        <header class="title-identity"><span>THE FRONTIER AWAITS</span><h1>ZILLIONS</h1></header>
         <nav class="menu-list" aria-label="Title menu">
           <button type="button" class="menu-word is-focus" id="a-play"><b>Enter World</b></button>
           <button type="button" class="menu-word" id="nav-squad">Custom Battles</button>
@@ -304,17 +315,17 @@ export function shellMarkup() {
       </div>
 
       <div id="screen-character-create" class="character-create-screen shell-screen hidden">
-        <div class="creator-head"><span>NEW CHARACTER</span><h1>CREATE YOUR CHARACTER</h1><p>You lead the first landing. Companions join your chapter as you conquer.</p></div>
+        <div class="creator-head"><span>NEW CHARACTER</span><h1>CREATE YOUR CHARACTER</h1></div>
         <form id="character-create-form" class="creator-form creator-xl">
-          <section class="creator-preview" id="creator-preview" aria-label="Live 3D character preview"><canvas id="creator-preview-canvas"></canvas><strong id="creator-preview-race">HUMAN</strong><span>Your in-game character preview.</span></section>
+          <section class="creator-preview" id="creator-preview" aria-label="Live 3D character preview"><canvas id="creator-preview-canvas"></canvas><strong id="creator-preview-race">HUMAN</strong></section>
           <div class="creator-controls">
             <nav id="creator-steps" aria-label="Character creation"></nav>
             <h2 id="creator-step-title">Origin</h2>
             <div data-creator-step="0"><h3>Origin</h3><div id="creator-origin-slot"></div></div>
             <fieldset data-creator-step="2"><legend>AVAILABLE NOW</legend><div id="creator-classes" class="creator-classes"></div></fieldset>
-            <div data-creator-step="2"><h3>Leader archetype</h3><p>More archetypes · Coming soon</p><div id="leader-archetypes"></div></div>
-            <div data-creator-step="3"><h3>Background</h3><p>Begin as a frontier commander. Additional backgrounds and their starting bonuses are coming soon.</p><button type="button" disabled>Veteran · Coming soon</button><button type="button" disabled>Explorer · Coming soon</button><button type="button" disabled>Strategist · Coming soon</button></div>
-            <div data-creator-step="4"><h3>Affiliation</h3><div class="affiliation-choice"><b>Independent commander</b><p>You do not need to rule a faction to enter the world.</p></div><div class="affiliation-future"><button type="button" disabled>Join a house or faction · Coming soon</button><button type="button" disabled>Found a house or faction · Coming soon</button><button type="button" disabled>Kingdoms & empires · Coming soon</button></div><p id="creator-faction-note"></p><label>Campaign banner · optional<input id="creator-faction-name" maxlength="32" placeholder="Your expedition name"></label><label>Culture<select id="creator-faction-culture"></select></label><label>Banner color<select id="creator-faction-color"></select></label><label>Emblem<select id="creator-faction-emblem"></select></label><div id="creator-banner-preview" aria-label="Campaign banner preview"></div><button type="button" disabled>Faction doctrines · Coming soon</button></div>
+            <div id="leader-archetypes" class="hidden" aria-hidden="true"></div>
+            <div data-creator-step="3"><article class="origin-story"><span>FRONTIER COMMANDER</span><p>Your expedition has reached the frontier. Establish a foothold, gather a company and break the hive siege.</p><p>You begin with frontier equipment and command of the landing force. Your victories, gear and companions persist between missions.</p></article></div>
+            <div data-creator-step="4"><h3>Affiliation</h3><div class="affiliation-choice"><b>Independent commander</b><p>You do not need to rule a faction to enter the world.</p></div><div class="affiliation-future hidden"><button type="button" disabled>Join a house or faction · Coming soon</button><button type="button" disabled>Found a house or faction · Coming soon</button><button type="button" disabled>Kingdoms & empires · Coming soon</button></div><p id="creator-faction-note"></p><label>Campaign banner · optional<input id="creator-faction-name" maxlength="32" placeholder="Your expedition name"></label><label>Culture<select id="creator-faction-culture"></select></label><label>Banner color<select id="creator-faction-color"></select></label><label>Emblem<select id="creator-faction-emblem"></select></label><div id="creator-banner-preview" aria-label="Campaign banner preview"></div></div>
             <div data-creator-step="5"><h3>Ready to begin</h3><p id="creator-review"></p></div>
             <label data-creator-step="5">NAME<input id="creator-name" maxlength="18" autocomplete="off" placeholder="Character name" required></label>
             <fieldset data-creator-step="0"><legend>ORIGIN</legend><div id="creator-races" class="creator-races"></div></fieldset>
@@ -368,7 +379,7 @@ export function shellMarkup() {
 
       <div id="screen-share" class="shell-screen hidden">
         <div class="setuphead"><button class="tbtn" id="share-back" type="button">Back</button><h2 id="share-title">Join a siege</h2></div>
-        <div class="share-card glass" id="share-card"><span class="modeeyebrow">DROP-IN CO-OP</span><h3 id="share-card-title">Joining</h3><p class="mphint" id="share-card-copy"></p></div>
+        <div class="share-card glass" id="share-card"><span class="modeeyebrow">BATTLE INVITE</span><h3 id="share-card-title">Joining</h3><p class="mphint" id="share-card-copy"></p></div>
       </div>
 
       <div id="screen-quick" class="shell-screen hidden">
@@ -421,7 +432,7 @@ export function shellMarkup() {
           <div class="steplabel culture-label">Colony culture <small>— the look of your base and the army your camps train</small></div>
           <div class="diffseg cultureseg" id="cultureseg"></div>
           <div id="culture-detail" class="culture-detail"></div>
-          <div class="steplabel">Leaders <small>— Recruit more leaders through your chapter.</small></div>
+          <div class="steplabel setup-leader-label">Leaders <small>— Recruit more leaders through your chapter.</small></div>
           <div id="setup-leaders" class="leader-grid"></div>
           <div id="setup-abilities" class="qwer-bar" aria-label="Ability bar"></div>
           <div class="steplabel diff-label">Difficulty</div>
@@ -473,7 +484,7 @@ export function shellMarkup() {
               <label class="setrow"><span>Master volume</span><input type="range" id="set-vol" min="0" max="100" value="100"><b id="set-vol-val">100%</b></label>
               <label class="setrow"><span>Music volume</span><input type="range" id="set-music" min="0" max="100" value="100"><b id="set-music-val">100%</b></label>
               <label class="setrow"><span>Sound effects</span><input type="checkbox" id="set-sfx"><b id="set-sfx-val"></b></label>
-              <div class="sethint">Weapon tones are procedural. Hits and abilities also play CC0 impact samples (Kenney). Mute anytime with <kbd>M</kbd>.</div>
+              <div class="sethint">Mute or restore sound anytime with <kbd>M</kbd>.</div>
             </div>
             <div id="set-pane-video" class="setpane hidden">
               <div class="setrow"><span>Graphics quality</span><div class="modeseg" id="set-quality"><button class="diffbtn" data-q="low" type="button">Low</button><button class="diffbtn" data-q="medium" type="button">Medium</button><button class="diffbtn" data-q="high" type="button">High</button><button class="diffbtn" data-q="auto" type="button">Auto</button></div></div>

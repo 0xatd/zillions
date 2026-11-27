@@ -5,6 +5,7 @@
 // bookkeeping (kept input logs, flags), and the client-write revokes.
 //   npm run check:postgres
 import assert from 'node:assert/strict';
+import {checkStrategicWorld} from './strategic-world-postgres-cases.mjs';
 import {checkSharedReplays} from './share-replay-postgres-cases.mjs';
 import {checkFriendParties} from './friend-party-postgres-cases.mjs';
 import { execFileSync } from 'node:child_process';
@@ -217,6 +218,7 @@ try {
 
   await checkFriendParties(q, async()=>{const c=new pg.Client({host:data,port,user:'postgres',database:'postgres'});await c.connect();return c;});
   await checkSharedReplays(q, async()=>{const c=new pg.Client({host:data,port,user:'postgres',database:'postgres'});await c.connect();return c;});
+  await checkStrategicWorld(q);
 } finally {
   await client.end().catch(() => {});
   try { execFileSync(join(bin, 'pg_ctl'), ['-D', data, '-m', 'immediate', 'stop'], quiet); } catch { /* already down */ }

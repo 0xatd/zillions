@@ -1,3 +1,4 @@
+import {StrategicMap,settleLocalEncounter,reserveLocalEncounter} from './strategic-map.js';
 import { RoomRelay } from './room-relay.js';
 import { HitFeedback } from './hit-feedback.js';
 import {FriendParty,partyCode} from './friend-party.js';
@@ -66,7 +67,7 @@ import { MenuVignette } from './menu-vignette.js';
 import { loadMeta, awardRun } from './meta.js';
 import { buildMatchReport } from './match-report.js';
 import { matchReplayPayload, parseSharedMatch, sharedMatchFields } from './match-session.js';
-import { accountUpgradeRequest, dailyBoardRequest, dailyScoreRequest, matchResultRequest, matchStartRequest, replayPublishRequest, replayReadRequest } from './backend.js';
+import { worldRequest, accountUpgradeRequest, dailyBoardRequest, dailyScoreRequest, matchResultRequest, matchStartRequest, replayPublishRequest, replayReadRequest } from './backend.js';
 import { dropPendingMatch, queuePendingMatch, readPendingMatches, retryableMatchError } from './match-outbox.js';
 import { stateHash } from './lockstep-hash.js';
 import {
@@ -326,12 +327,14 @@ class App {
       onLocateKeep: () => this._lookAtKeep(),
       onHeroUpgrade: (key) => this.issue({ t: 'heroUpgrade', key, p: this.myPlayer }),
       onBlessing: (i) => this.issue({ t: 'blessing', i, p: this.myPlayer }),
+      onLook: (x,z) => {this._cameraPinned=false;this._recenter=false;this.focus.x=x;this.focus.z=z;},
       onBuilder: (c) => this.issue({...c,p:this.myPlayer}),
       onFocusEnemy: (id) => this.issue({t:'focus',p:this.myPlayer,id}),
-      onStance: (s) => this.issue({ t: 'stance', s, p: this.myPlayer }),
+      onStance: (s) => s === 'rally' ? this._armRally() : this._orderStance(s),
       onRestart: () => this._restartOrReturn(),
+      isWorldBattle: () => !!this._match?.world,
       onRetry: () => this._retryMission(),
-      canRetry: (game) => retryAllowed({
+      canRetry: (game) => !this._match?.world && retryAllowed({
         netMode: !!this.netMode,
         mode: game?.mode,
         levelId: game?.levelId,
@@ -343,6 +346,7 @@ class App {
       onResume: () => this.closePauseMenu(),
       onContinue: () => this.continueGame(),
       onCampaignMap: () => this._openOverworld(),
+      onWorldVisibility: visible => visible ? this._showStrategicWorld() : this.strategicMap?.hide(),
       onEnterWorld: () => this._enterLeaderWorld(),
       onLeaderEntry: () => {
         if (!this.auth?.isSignedIn()) { this._guestSession = true; this.ui.noteGuestSession(); }
@@ -977,13 +981,14 @@ class App {
   // no ticket and keeps the fixed seed it always had.
   _isCustomBattle() { return this.lobby?.game ? isCustomGame(this.lobby.game) : !!this.ui._customBattle; }
 
-  async _requestMatchTicket({ levelId, mode, difficulty, roomId = null, joinToken = null, manualCoop = false, hero = null }) {
+  async _requestMatchTicket({ levelId, mode, difficulty, roomId = null, joinToken = null, manualCoop = false, hero = null, encounter = null }) {
     if (this._isCustomBattle() || !this.auth?.isSignedIn() || this.mpRole === 'spectator') return null;
     const character = selectedMmoCharacter(this.profile);
     if (!character) return null;
     try {
       return await matchStartRequest({
         characterId: character.id, levelId, mode, difficulty, roomId, joinToken,
+        ...((encounter || (this._worldEncounter?.characterId === character.id && this._worldEncounter.level === levelId && mode === 'campaign' && this._worldEncounter.id)) ? {worldEncounter:encounter||this._worldEncounter.id} : {}),
         ...(manualCoop ? { manualCoop: { displayName: this._publicName(), hero } } : {}),
       });
     } catch (error) {
@@ -1008,17 +1013,24 @@ class App {
       if (this._shareLobby && !this._shareLobby.started && !this._shareCanLaunch()) return;
       const level = this.ui.selectedLevel || 1;
       const lobbyRoom = this.onlineMode && this.lobby?.game ? this.lobby.game.id : null;
+      if(this._worldEncounter && !this._isCustomBattle() && lobbyRoom){
+        const character=selectedMmoCharacter(this.profile);
+        try {await worldRequest('room',{characterId:character.id,requestId:crypto.randomUUID(),target:{id:lobbyRoom,actors:[this.auth.user.id,...this.peerUserIds]}});}
+        catch {this.ui.showBanner('Every encounter participant must join this room before launch. Return to the world to withdraw missing participants.','bad',6500);return;}
+      }
       // The server only issues room tickets for a room that is in game.
       if (lobbyRoom) await this.lobby.touchGame({ status: 'playing' }).catch((err) => console.warn('room status failed', err));
       const ticket = await this._requestMatchTicket({ levelId: level, mode, difficulty: d, roomId: lobbyRoom, manualCoop: !lobbyRoom, hero });
+      if(this._worldEncounter && !this._isCustomBattle() && !ticket?.world){if(lobbyRoom)await this.lobby.touchGame({status:'open'}).catch(()=>{});this.ui.showBanner('Could not reserve the shared encounter. Return to the world and retry.','bad',6000);return;}
       const match = {
+        world:ticket?.world||null,
         ticket: ticket?.ok ? ticket.ticket : null,
         seed: ticket?.ok ? ticket.seed : null,
         roomId: ticket?.ok ? ticket.roomId : lobbyRoom,
         joinToken: ticket?.ok ? ticket.joinToken || null : null,
         error: ticket && !ticket.ok ? ticket.error : null,
       };
-      const shared = { seed: match.seed, roomId: match.roomId, joinToken: match.joinToken };
+      const shared = sharedMatchFields(match);
       const culture = cultureKey(this.ui.selectedCulture);
       const seated = (this._shareLobby?.seats || []).filter((seat) => !seat.host);
       if (seated.length) {
@@ -1079,17 +1091,19 @@ class App {
       log: resumed?.log || null,
       error: given?.error || (soloTicket && !soloTicket.ok ? soloTicket.error : null),
       ticketPromise: null,
+      world: resumed?.world || given?.world || soloTicket?.world || (mode === 'campaign' && this._worldEncounter?.local && this._worldEncounter.level === levelId ? {encounter:this._worldEncounter.id,troops:this._worldEncounter.troops,characterId:this._worldEncounter.characterId} : null),
     };
     // Guests (and resumed co-op peers) fetch their own ticket for the room in
     // the background; it is only needed when the match ends.
     if (!match.ticket && match.roomId && mp && mp.role !== 'spectator' && this.auth?.isSignedIn()) {
       const request = resumed?.ticketPromise || this._requestMatchTicket({
-        levelId, mode, difficulty, roomId: match.roomId, joinToken: match.joinToken,
+        levelId, mode, difficulty, roomId: match.roomId, joinToken: match.joinToken, encounter:match.world?.encounter,
       });
       match.ticketPromise = request.then((ticket) => {
         if (ticket?.ok) {
           if (match.seed != null && ticket.seed !== match.seed) console.warn('room seed differs from the host seed');
           match.ticket = ticket.ticket;
+          if(ticket.world)match.world=ticket.world;
         } else match.error = ticket?.error || 'match_start_failed';
         return ticket;
       });
@@ -1101,6 +1115,7 @@ class App {
 
   async startGame(difficulty, heroKey, mp = null, snap = null) {
     this._customBattle = this._isCustomBattle();
+    if(this._customBattle)this._worldEncounter=null;
     this._seedRun = !!this._startingSeedRun;
     this._startingSeedRun = false;
     this.pendingAbility = null;
@@ -1144,13 +1159,24 @@ class App {
     const soloTicket = !snap && !mp && mode !== 'daily' && forcedSeed == null
       ? await this._requestMatchTicket({ levelId, mode, difficulty })
       : null;
+    if (!snap && !mp && this._worldEncounter && this.auth?.isSignedIn() && !soloTicket?.world) {
+      this.ui.showBanner('The fleet could not reserve this battle. Return to the world and try again; your troops are unchanged.', 'bad', 7000);
+      return;
+    }
     this._match = this._beginMatchRecord({ snap, mp, heroKeys, levelId, mode, difficulty, soloTicket });
+    if(snap&&this.auth?.isSignedIn()&&this._match.world&&!this._match.ticket){
+      const restoredTicket=await this._requestMatchTicket({levelId,mode,difficulty,roomId:this._match.roomId,encounter:this._match.world.encounter});
+      if(!restoredTicket?.ok){this.ui.showBanner('Battle recovery is temporarily unavailable. Your saved battle is unchanged; retry or return to the world.','bad',7000);return false;}
+      this._match.ticket=restoredTicket.ticket;this._match.seed=restoredTicket.seed;this._match.world=restoredTicket.world;
+    }
+    if(!snap&&!this.auth?.isSignedIn()&&this._match.world?.characterId)await reserveLocalEncounter(this._match.world);
+    this._worldEncounter = null;
     this.ui.setDeploymentLoading(true, null, 'Preparing terrain and routes');
     this.map = new GameMap(seed, level.theme, { size: level.size, nests: level.nests });
     this.pal = level.theme.palette; // drives sky/fog grading
     const matchSeed = daily ? daily.seed : (forcedSeed != null ? forcedSeed : this._match.seed);
     this.game = new Game(this.map, daily ? 'normal' : difficulty, heroKeys, snap, levelId, mode,
-      Number.isInteger(matchSeed) ? { rngSeed: matchSeed, culture: cultureId, ...(daily ? { daily } : {}) } : { culture: cultureId });
+      { ...(Number.isInteger(matchSeed) ? {rngSeed:matchSeed} : {}),culture:cultureId,...(daily?{daily}:{}),worldArmy:this._match.world ? this._match.world.army || [this._match.world.troops] : [] });
     // Every played run keeps an input log so it can be shared. A resumed run
     // continues the log it saved. A resume without one, and a spectator, cannot
     // be replayed from the first step.
@@ -1319,6 +1345,10 @@ class App {
     for (const c of this.payCoins || []) this.scene.remove(c.mesh);
     this.payCoins = [];
     this.coinBorn?.clear();
+    if (this.coinMesh) this.coinMesh.count = 0;
+    if (this.corpseMesh) this.corpseMesh.count = 0;
+    this.horde?.begin();
+    this.horde?.commit();
   }
 
   _replayClock(steps) {
@@ -2024,6 +2054,7 @@ class App {
       mode: 'build_mode', ability: 'ability1', ability2: 'ability2', ability3: 'ability3', ability4: 'ability4',
       center: 'camera_center' }).map(([label, action]) => [label, keyLabel(binds[action])]));
     const step = coachStep(this._coach, labels);
+    if(step.id==='move' && this.game?.phase!=='found'){step.title='Lead your hero';step.body='Right-click the ground to move. Right-click an enemy to attack-move. Your party has already established the outpost.';}
     const siege = this.game?.firstSiege;
     if (['stances', 'attack', 'victory'].includes(step.id)) {
       if (siege?.stage === 'warning') step.title += ` · ${Math.max(0, Math.ceil(this.game.nests[siege.nestId]?.musterT || 0))}s`;
@@ -2190,6 +2221,9 @@ class App {
       location.reload();
       return;
     }
+    if (game && !game.over && this._match?.world) {
+      this.ui.showBanner('This battle belongs to your fleet. Resume it, or return to the world to withdraw.','info',6000);return;
+    }
     if (game && !game.over) {
       const diff = game.diffKey || 'normal';
       const hero = this.ui.selectedHero;
@@ -2208,7 +2242,7 @@ class App {
     else if (campaign) this.ui.showOverworld();
     else {
       this.ui._playTab = 'campaign';
-      this.ui._showScreen('home');
+      this.ui._showScreen('main');
     }
   }
 
@@ -2216,8 +2250,38 @@ class App {
     if (this.game && !this.game.over) return;
     const character=selectedMmoCharacter(this.profile);
     if (!character) {this.ui.showCharacterCreator();return;}
-    // World traversal is not built. Enter the truthful campaign surface.
+    // The selected character enters the persistent strategic layer.
     this._openOverworld();
+  }
+
+  async _showStrategicWorld() {
+    if(this._localFleetReturn){try{await this._localFleetReturn();this._localFleetReturn=null;}catch{this.ui.showBanner('Fleet return is waiting for browser storage. Keep this tab open and retry.','bad',7000);}}
+    if(this.ui.nav.current()?.name!=='overworld')return;
+    const character = selectedMmoCharacter(this.profile);
+    if (!character) return;
+    if (!this.strategicMap) this.strategicMap = new StrategicMap(this.ui.root.querySelector('#screen-overworld'), {
+      character: () => selectedMmoCharacter(this.profile),
+      signedIn: () => !!this.auth?.isSignedIn(),
+      cleared: () => Number(this.profile.campaign || 0),
+      onBack: () => this.ui._showScreen('main'),
+      onTrade: () => this.ui.showCharacterSheet('shop'),
+      savedEncounter: () => {const s=this._loadSave();return s?.match?.world?.encounter||s?.world?.encounter;},
+      onResume: () => this.continueGame(),
+      onCoop: async (level,encounter,troops,room) => {
+        const character=selectedMmoCharacter(this.profile);
+        this._worldEncounter={id:encounter,troops,level,characterId:character.id,local:false};
+        this.ui.selectedMode='campaign';this.ui.selectedLevel=level;this.ui._customBattle=false;
+        try {
+          if(room){const lobby=await this._openLobby();if(lobby.game?.id===room.id){this.ui.showSetup({online:lobby.game,mode:lobby.game.mode});this._onRoomUpdate(lobby.game);return;}if(lobby.game)throw new Error('Leave your current battle lobby first.');const row=await lobby.findByCode(room.code);if(!row)throw new Error('This encounter room has closed. Withdraw from the encounter, then prepare a new battle.');await this.joinOnlineGame(row);}
+          else {if(this.lobby?.game)throw new Error('Leave your current battle lobby first.');await this.createOnlineGame('private');if(!this.lobby?.game)throw new Error('Could not open encounter room.');await worldRequest('room',{characterId:character.id,requestId:crypto.randomUUID(),target:{id:this.lobby.game.id,actors:[this.auth.user.id]}});}
+        }catch(e){this.ui.showBanner(e.message||'Could not open the encounter room. Return to the world and retry.','bad',6000);}
+      },
+      onBattle: (level, encounter, troops) => {
+        this._worldEncounter = {id:encounter,troops,level,characterId:selectedMmoCharacter(this.profile)?.id,local:!this.auth?.isSignedIn()};
+        this.ui.showSetup({mode:'campaign',level});
+      },
+    });
+    this.strategicMap.show();
   }
 
   _openOverworld() {
@@ -2240,13 +2304,23 @@ class App {
     }
     this._leaveSoloMatch();
     this.ui._playTab = 'campaign';
-    this.ui._showScreen('home');
+    this.ui._showScreen('main');
   }
 
   _leaveSoloMatch() {
     this._loadingZoom = false;
     this.paused = false;
     this.missionIntro = null;
+    this._coach = null;
+    this._tut = null;
+    this._attackMoveArmed = false;
+    this._rallyArmed = false;
+    this._pointer = null;
+    this.keys.clear();
+    this._keepPeek = null;
+    this._recenter = false;
+    this._camDistTarget = null;
+    this.shake = 0;
     this.acc = 0;
     this.replay = null;
     this._netPumpStop();
@@ -2270,7 +2344,7 @@ class App {
     this.netMode = false;
     this.mpRole = null;
     this.ui.hideMatchChrome();
-    this.ui.nav.leaveMatch('home');
+    this.ui.nav.leaveMatch('characters');
     this.showLoginBackdrop();
   }
 
@@ -2289,6 +2363,7 @@ class App {
   }
 
   _retryMission() {
+    if (this._match?.world) return this._restartOrReturn();
     const unlocked = Math.min(LEVELS.length, Number(this.profile?.campaign || 0) + 1);
     const hero = this.ui.selectedHero;
     if (!retryAllowed({
@@ -2446,6 +2521,7 @@ class App {
   }
 
   async _selectMmoCharacter(id) {
+    this._worldEncounter=null;
     normalizeMmoCharacters(this.profile);
     const character = this.profile.mmoCharacters.find((entry) => entry.id === id);
     if (!character) return;
@@ -2918,14 +2994,14 @@ class App {
     if (!this.game || this._customBattle || this.replay || this._seedRun || this.game.over || this.game.mode === 'daily' || this.mpRole === 'guest' || this.mpRole === 'spectator') return;
     if (!force && this.paused) return;
     try {
-      const save = { when: Date.now(), snap: this.game.snapshot() };
+      const save = { when: Date.now(), snap: this.game.snapshot(), ...(this._match?.world ? {world:this._match.world,roomId:this._match.roomId||null} : {}) };
       // The local save also keeps the match ticket and the input log so far,
       // so a resumed signed-in run can still be verified later. The
-      // cloud copy stays snapshot-only.
+      // cloud copy retains the encounter reference, never the reward ticket.
       const m = this._match;
       const match = m ? {
         ticket: m.ticket || null, seed: m.seed ?? null, roomId: m.roomId || null, joinToken: m.joinToken || null,
-        heroes: m.heroes, log: this.game.inputLog ? this.game.inputLog.slice() : null,
+        heroes: m.heroes, world:m.world||null, log: this.game.inputLog ? this.game.inputLog.slice() : null,
       } : null;
       const persist = () => {
         try {
@@ -3097,6 +3173,11 @@ class App {
     }
     persistRunTelemetry(this.game);
     this._endExtras = null;
+    if (this._match?.world?.characterId && !this.auth?.isSignedIn()) {
+      const world={...this._match.world},outcome={won:!!won,troopsLost:this.game.expeditionLosses?.[0]||0};
+      this._localFleetReturn=()=>settleLocalEncounter(world,outcome);
+      this._localFleetReturn().then(()=>{this._localFleetReturn=null;}).catch(()=>this.ui.showBanner('Battle complete, but the fleet return could not be saved. Keep this tab open and retry when browser storage is available.','bad',8000));
+    }
     const h = this.game.heroes[this.myPlayer];
     try { localStorage.removeItem('zillions_save'); } catch { /* ignore */ }
     if (this.auth?.isSignedIn()) {
@@ -3167,6 +3248,7 @@ class App {
       // (which can already be cleared). The server takes it from the ticket.
       roomId: match.roomId || null,
       ticket: match.ticket,
+      worldEncounter: match.world?.encounter || null,
       report,
       ...(replay ? { replay } : {}),
     };
@@ -3214,6 +3296,13 @@ class App {
     }
     const result = await matchResultRequest(pending);
     if (!result?.ok) throw Object.assign(new Error(result?.error || 'match_result_failed'), { status: 503 });
+    // Reward acceptance and fleet settlement are separate idempotent commits.
+    // Never turn accepted rewards into a failed result if the world is offline.
+    // The encounter remains recoverable from its accepted ticket/report.
+    if (pending.worldEncounter && pending.userId === this.auth?.user?.id) {
+      try { await worldRequest('resolve', {characterId:pending.characterId,encounter:pending.worldEncounter,requestId:`settle-${pending.requestId}`}); }
+      catch { result.worldPending = true; }
+    }
     dropPendingMatch(pending.requestId, pending.userId);
     return result;
   }
@@ -3273,6 +3362,7 @@ class App {
         skipped: result.skippedItems || [], pending: false, saved: true, campaignCleared: st.campaignCleared,
       };
       this.ui.setEndRewards?.(this._endExtras);
+      if(result.worldPending)this.ui.showBanner('Rewards saved. Fleet return is pending—use Recover battle result in the world.','info',7000);
     }
     this.ui.setProfile(p);
     this.ui.setCampaign(p.campaign || 0);
@@ -3403,12 +3493,12 @@ class App {
           this.ui.mpStatus(`❌ That save is for ${save.snap.heroKeys.length} players — you have ${this.peers.length + 1} connected.`);
           return;
         }
-        const shared = save.match ? { seed: save.match.seed ?? null, roomId: save.match.roomId || null, joinToken: save.match.joinToken || null } : null;
+        const shared = sharedMatchFields(save.match);
         this.peers.forEach((p, i) => p.send({ t: 'start', snap: save.snap, you: i + 1, match: shared }));
-        this._resumeMatch = save.match || null;
+        this._resumeMatch = save.match || (save.world ? {world:save.world,roomId:save.roomId||null} : null);
         await this.startGame(save.snap.diff, null, { myPlayer: 0, role: 'host' }, save.snap);
       } else if (!this.mpRole) {
-        this._resumeMatch = save.match || null;
+        this._resumeMatch = save.match || (save.world ? {world:save.world,roomId:save.roomId||null} : null);
         await this.startGame(save.snap.diff, null, null, save.snap);
       }
     }, (error) => this._discardBrokenSave(error));
@@ -5285,7 +5375,7 @@ class App {
       ? '⏳ Resyncing…'
       : this.netStallT > 1.2
         ? `⏳ Network catch-up — waiting for window ${Math.ceil(this.simFrame / NET_STEP)}…`
-        : '⏳ Syncing co-op…';
+        : '⏳ Syncing battle…';
     this.ui.setWaiting(visibleStall, stallText);
     this._refreshDiagnosticsUI(visibleStall);
   }
@@ -5774,6 +5864,7 @@ class App {
   }
 
   _openCustomGames() {
+    this._worldEncounter=null;
     this.ui._showScreen('custom');
     this._renderCustomBrowser();
     this._openLobby().then((lobby) => {
@@ -5783,6 +5874,7 @@ class App {
   }
 
   playArcadeMap(map) {
+    this._worldEncounter=null;
     if (!map) return;
     this.ui._customBattle = true;
     this.ui.selectedMode = map.mode || 'campaign';
@@ -5797,6 +5889,7 @@ class App {
   }
 
   async createCustomGame({ name, mapId, mode, mapName, difficulty, maxPlayers, visibility = 'public' } = {}) {
+    this._worldEncounter=null;
     const lobby = await this._openLobby();
     if (!lobby?.connected) {
       this.ui.showBanner('📡 The lobby is unreachable — Custom Games needs the server.', 'bad', 4500);
@@ -8094,7 +8187,7 @@ class App {
         const typing = e.target && (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable);
         if (this.game && !typing) {
           const repeatAct = actionFor(this.binds(), k, 'battle');
-          if (repeatAct === 'camera_center' || (repeatAct && (repeatAct.startsWith('camera_') || repeatAct.startsWith('move_')))) e.preventDefault();
+          if (repeatAct) e.preventDefault();
         }
         return;
       }
@@ -8191,6 +8284,13 @@ class App {
         case 'stance_defend': e.preventDefault(); this._orderStance('defend'); break;
         case 'stance_follow': e.preventDefault(); this._orderStance('guard'); break;
         case 'stance_push': e.preventDefault(); this._orderStance('attack'); break;
+        case 'stance_rally': e.preventDefault(); this._armRally(); break;
+        case 'workers_develop': case 'workers_maintain': case 'workers_fortify': case 'workers_expand':
+          e.preventDefault();
+          if (this.myPlayer !== 0) this.ui.showBanner('The host directs the shared colony crew.', 'info', 1600);
+          else if (this.game.builders) this.issue({t:'builderOrder',s:act.slice(8),p:0});
+          else this.ui.showBanner('Found your colony before directing workers.', 'info', 1600);
+          break;
         case 'tower_priority': this.issue({ t: 'towerpri', p: this.myPlayer }); break;
         case 'drop_item': this.issue({ t: 'drop', p: this.myPlayer, i: -1 }); break;
         case 'swap_set': this.issue({ t: 'swapset', p: this.myPlayer }); break;
@@ -8198,7 +8298,7 @@ class App {
         case 'lattice_panel': e.preventDefault(); this.ui.showCharacterSheet('lattice'); break;
         case 'mute': this.audio.setMuted(!this.audio.muted); this.ui.setMuteUI(this.audio.muted); break;
         case 'pause': e.preventDefault(); this.setSpeed(0); break;
-        case 'menu': if (this.pendingAbility != null || this._attackMoveArmed) {this.pendingAbility=null;this._attackMoveArmed=false;break;} if(this.ui._battlePanel){this.ui._battlePanel=null;this.ui.root.querySelector('#battle-details').classList.add('hidden');}else this.togglePauseMenu(); break;
+        case 'menu': if (this.pendingAbility != null || this._attackMoveArmed || this._rallyArmed) {this.pendingAbility=null;this._attackMoveArmed=false;this._rallyArmed=false;break;} if(this.ui._battlePanel){this.ui._battlePanel=null;this.ui.root.querySelector('#battle-details').classList.add('hidden');}else this.togglePauseMenu(); break;
         default:
           break;
       }
@@ -8246,7 +8346,7 @@ class App {
       this.audio.init();
       if (!this.game || this.game.over || !this.ui.root.querySelector('#overlay').classList.contains('hidden')) return;
       if (e.button === 2 && this.pendingAbility != null) { this.pendingAbility = null; return; }
-      if (e.button === 2 || (e.button === 0 && this._attackMoveArmed)) {
+      if (e.button === 2 || (e.button === 0 && (this._attackMoveArmed || this._rallyArmed))) {
         this._issuePointerOrder(e);
         return;
       }
@@ -8324,8 +8424,25 @@ class App {
     return this._binds;
   }
 
+  _armRally() {
+    if (!this.game || this.game.over || this.game.mode === 'labyrinth') return;
+    this._rallyArmed = !this._rallyArmed;
+    this._attackMoveArmed = false;
+    this.pendingAbility = null;
+    this.ui.showBanner(this._rallyArmed ? 'Choose a rally point. Left-click to confirm, right-click to cancel.' : 'Rally cancelled.', 'info', 2400);
+  }
+
   _issuePointerOrder(e) {
     const picked = this._pickPointer(e);
+    if (this._rallyArmed) {
+      if (e.button === 2) { this._rallyArmed = false; return; }
+      if (e.button === 0 && picked.ground) {
+        const q = quantizeOrder(picked.ground.x, picked.ground.z);
+        this.issue({t:'rally',p:this.myPlayer,...q});
+        this._rallyArmed = false;
+      }
+      return;
+    }
     const order = pointerOrder({ button: e.button, armed: this._attackMoveArmed, enemy: !!picked.enemy });
     this._attackMoveArmed = false;
     if (!order) return;
@@ -8714,7 +8831,7 @@ class App {
     const active = document.activeElement;
     const editing = !!document.querySelector?.('#social-panel[open], #friend-party-dialog[open]') || (!!active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable));
     let panX = 0, panZ = 0;
-    if (!this.replay && !editing && !this.paused && !this._presentHold) {
+    if (!this.replay && !editing && !this.paused && !this._presentHold && this.ui.overlayHidden() && !this.game.over) {
       const held = (axis, action) => cameraAxisHeld(binds, this.keys, axis, {
         wasdCamera: !!feel.wasdCamera, actionFor, isHeld, cameraAction: action,
       });
@@ -8723,7 +8840,7 @@ class App {
       if (held('left', 'camera_left')) panX -= 1;
       if (held('right', 'camera_right')) panX += 1;
       if (feel.edgePan !== false && this._pointer?.in) {
-        const edge = 36;
+        const edge = 18;
         const w = window.innerWidth, h = window.innerHeight;
         const x = this._pointer.x, y = this._pointer.y;
         if (x < edge) panX -= (edge - x) / edge;
@@ -8751,9 +8868,9 @@ class App {
       this.focus.x += (tx - this.focus.x) * k;
       this.focus.z += (tz - this.focus.z) * k;
     } else if ((panX || panZ) && !this._presentHold) {
-      const len = Math.hypot(panX, panZ) || 1;
-      this.focus.x += (panX / len) * 24 * dt;
-      this.focus.z += (panZ / len) * 24 * dt;
+      const len = Math.max(1, Math.hypot(panX, panZ));
+      this.focus.x += (panX / len) * 30 * dt;
+      this.focus.z += (panZ / len) * 30 * dt;
     }
     const mapSize = this.map?.size || MAP_SIZE;
     const edgePad = 1.2;
@@ -9437,7 +9554,7 @@ class App {
         if (events.length) {
           this._coach = coachApply(this._coach, events);
           const siege = this.game.firstSiege;
-          const paintKey = `${this._coach.index}|${siege?.stage}|${siege?.waveIds.length}|${Math.ceil(this.game.nests[siege?.nestId]?.musterT || 0)}`;
+          const paintKey = `${this._coach.index}|${this.game.phase}|${siege?.stage}|${siege?.waveIds.length}|${Math.ceil(this.game.nests[siege?.nestId]?.musterT || 0)}`;
           if (paintKey !== this._coachPaintKey) { this._coachPaintKey = paintKey; this._paintCoach(); }
         }
       }

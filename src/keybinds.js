@@ -138,6 +138,11 @@ export const ACTIONS = [
     id: 'stance_push', name: 'Stance: push lanes', scopes: ['battle'], context: 'army', default: 'f3',
     desc: 'Squads take lane nodes, then siege the hives.',
   },
+  { id: 'stance_rally', name: 'Army: rally at point', scopes: ['battle'], context: 'army', default: 'f4', desc: 'Choose a point for the army to gather and hold.' },
+  { id: 'workers_develop', name: 'Workers: develop', scopes: ['battle'], context: 'army', default: 'f5', desc: 'Balance income, camps and defenses.' },
+  { id: 'workers_maintain', name: 'Workers: maintain', scopes: ['battle'], context: 'army', default: 'f6', desc: 'Repair and rebuild existing structures.' },
+  { id: 'workers_fortify', name: 'Workers: fortify', scopes: ['battle'], context: 'army', default: 'f7', desc: 'Build and upgrade defenses.' },
+  { id: 'workers_expand', name: 'Workers: expand', scopes: ['battle'], context: 'army', default: 'f8', desc: 'Develop secured frontier holdings.' },
   { id: 'tower_priority', name: 'Cycle tower targeting', scopes: ['battle'], context: 'army', default: 't' },
   { id: 'drop_item', name: 'Drop newest field item', scopes: ['battle'], context: 'army', default: 'z' },
 

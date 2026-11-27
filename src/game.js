@@ -84,8 +84,8 @@ function segOpen(x0, z0, x1, z1, pass) {
 
 // v12: colony crew, corrected escort routing and committed combat windups.
 // v14: timed hero attacks and released damage; older readers must not drop them.
-export const SNAPSHOT_VERSION = 14;
-export const isCompatibleSnapshot = snap => snap?.v === SNAPSHOT_VERSION || snap?.v === 13 || snap?.v === 12;
+export const SNAPSHOT_VERSION = 15;
+export const isCompatibleSnapshot = snap => snap?.v === SNAPSHOT_VERSION || snap?.v === 14 || snap?.v === 13 || snap?.v === 12;
 
 export class Game {
   // heroKeys: a hero key string (solo) or an array of keys (co-op, one per player).
@@ -159,6 +159,10 @@ export class Game {
     this.cityGi = -1;
 
     this.builders = null;
+    this.armyRally = null;
+    this.worldArmy = Array.isArray(opts.worldArmy) ? opts.worldArmy.slice(0,4).map(n=>Math.max(0,Math.min(40,Math.floor(Number(n)||0)))) : [];
+    this.expeditionLosses = this.worldArmy.map(()=>0);
+    this.worldArmyDeployed = false;
     this.stance = 'defend';      // army stance: defend | guard | attack (no micro)
     this.time = 0;
     this.threat = 0;             // the clock that replaced nightfall
@@ -187,7 +191,7 @@ export class Game {
 
     this.stats = {
       kills: 0, built: 0, lost: 0, coins: 0, nests: 0, nodes: 0, bestHeld: 0,
-      heroDeaths: 0, bossKillT: null, repaired: 0, spent: 0,
+      heroDeaths: 0, troopsLost: 0, bossKillT: null, repaired: 0, spent: 0,
       damageTaken: {}, builtByKind: {}, lostByKind: {}, armyPeak: {},
     };
     this._armyPeakSampleAt = 0;
@@ -281,6 +285,8 @@ export class Game {
       gold: snapNum(this.gold),
       site: this.site,
       stance: this.stance,
+      worldArmy: [...this.worldArmy], expeditionLosses:[...this.expeditionLosses], worldArmyDeployed:this.worldArmyDeployed,
+      armyRally: this.armyRally ? {...this.armyRally} : null,
       builders: this.builders ? JSON.parse(JSON.stringify(this.builders)) : null,
       firstSiege: this.firstSiege ? {
         stage: this.firstSiege.stage, nestId: this.firstSiege.nestId,
@@ -330,7 +336,7 @@ export class Game {
       })),
       coins: this.coins.map((cn) => [cn.id, snapNum(cn.x), snapNum(cn.z), cn.v]),
       units: this.units.filter((u) => !u.hero).map((u) => ({
-        id: u.id, k: u.key, x: snapNum(u.x), z: snapNum(u.z),
+        id: u.id, expeditionOwner:u.expeditionOwner ?? null, k: u.key, x: snapNum(u.x), z: snapNum(u.z),
         order: this.units.indexOf(u),
         hp: snapNum(u.hp), camp: u.camp || 0,
         hx: snapNum(u.holdX || u.x), hz: snapNum(u.holdZ || u.z),
@@ -431,6 +437,8 @@ export class Game {
     this.gold = snap.gold;
     this.site = snap.site ?? -1;
     this.stance = snap.stance || 'defend';
+    this.worldArmy = [...(snap.worldArmy || [])]; this.expeditionLosses=[...(snap.expeditionLosses||[])];this.worldArmyDeployed=!!snap.worldArmyDeployed;
+    this.armyRally = snap.armyRally ? {...snap.armyRally} : null;
     this.builders = this.mode !== 'labyrinth' && snap.builders ? JSON.parse(JSON.stringify(snap.builders)) : null;
     this.firstSiege = snap.firstSiege ? {
       stage: snap.firstSiege.stage || 'opening', nestId: snap.firstSiege.nestId ?? null,
@@ -489,7 +497,7 @@ export class Game {
       n.looted = !!looted;
     });
     this.stats = {
-      nests: 0, nodes: 0, bestHeld: 0, heroDeaths: 0, bossKillT: null, repaired: 0,
+      nests: 0, nodes: 0, bestHeld: 0, heroDeaths: 0, troopsLost: 0, bossKillT: null, repaired: 0,
       spent: 0, damageTaken: {}, builtByKind: {}, lostByKind: {}, armyPeak: {}, ...snap.stats,
       damageTaken: { ...(snap.stats?.damageTaken || {}) },
       builtByKind: { ...(snap.stats?.builtByKind || {}) },
@@ -536,6 +544,7 @@ export class Game {
 
     for (const us of snap.units) {
       const u = this._spawnUnit(us.k, us.x, us.z, us.camp || null);
+      u.expeditionOwner = us.expeditionOwner ?? null;
       u.id = us.id; // keep saved ids so they can't collide with future spawns
       u.hp = us.hp;
       u.holdX = us.hx; u.holdZ = us.hz;
@@ -928,6 +937,16 @@ export class Game {
     });
     this.phase = 'live';
     if (this.mode !== 'labyrinth') this.builders = createBuilders(this);
+    if (!this.worldArmyDeployed && this.mode === 'campaign') {
+      this.worldArmyDeployed = true;
+      this.worldArmy.forEach((count,player) => {
+        const hero=this.heroes[player];if(!hero)return;
+        for(let i=0;i<count;i++) {
+          const seat=this._reseat(hero.x+(i%5)-2,hero.z+2+Math.floor(i/5)) || [hero.x,hero.z];
+          const unit=this._spawnUnit('soldier',seat[0],seat[1],null);unit.expeditionOwner=player;
+        }
+      });
+    }
     if (this.firstSiege) {
       const reachable = this.nests.filter((n) => n.alive && !n.offMap);
       const live = reachable.length ? reachable : this.nests.filter((n) => n.alive);
@@ -2776,7 +2795,7 @@ export class Game {
     };
     // Born during a DEFEND order: take a slot on the Keep ring, not a freeze
     // at the barracks door.
-    if (this.stance === 'defend') {
+    if (this.stance === 'defend' || this.stance === 'rally') {
       let n = 0;
       for (const o of this.units) if (!o.hero && !o.dead) n++;
       [u.holdX, u.holdZ] = this._defendSlot(u, n + 1, n);
@@ -2792,14 +2811,16 @@ export class Game {
   // line should move) — the other stances stay no-ops on repeat presses.
   _defendSlot(u, n, i) {
     if (!this.hq || !this.hq.alive) return [u.x, u.z];
+    const anchor = this.stance === 'rally' && this.armyRally ? this.armyRally : {x:this.hq.cx,z:this.hq.cz};
+    const radius = this.stance === 'rally' ? Math.min(5.5, 1.5 + Math.sqrt(n) * .4) : 5.5;
     const base = n ? (i / n) * Math.PI * 2 : 0;
     for (let k = 0; k < 12; k++) {
       const a = base + (k / 12) * Math.PI * 2;
-      const x = this.hq.cx + Math.cos(a) * 5.5, z = this.hq.cz + Math.sin(a) * 5.5;
+      const x = anchor.x + Math.cos(a) * radius, z = anchor.z + Math.sin(a) * radius;
       const id = this.occ[(z | 0) * this.map.size + (x | 0)];
       if (this.map.isWalkable(x | 0, z | 0) && (id === 0 || id === undefined || this.gateIds.has(id))) return [x, z];
     }
-    const seat = this._reseat(this.hq.cx, this.hq.cz);
+    const seat = this._reseat(anchor.x, anchor.z);
     return seat || [u.x, u.z];
   }
 
@@ -2828,6 +2849,16 @@ export class Game {
     const len = Math.hypot(dx, dz) || 1;
     const fx = dx / len, fz = dz / len;
     return [-fz * side - fx * back, fx * side - fz * back];
+  }
+
+  setRally(x, z, p = 0) {
+    if (!this.heroes[p] || this.mode === 'labyrinth' || this.phase !== 'live' || this.over
+      || !Number.isFinite(x) || !Number.isFinite(z) || !this._safeTile(x,z)) return;
+    this.armyRally = {x, z};
+    this.stance = 'rally';
+    this._anchorDefense();
+    for (const u of this.units) if (!u.hero) {u.route=null;u.targetGi=-1;u.gateExit=false;}
+    this.msg('Army rally point set. Troops will gather and hold.');
   }
 
   setStance(st, p = 0) {
@@ -3122,6 +3153,7 @@ export class Game {
       }
       case 'heroUpgrade': this.upgradeHero(c.p || 0, c.key); break;
       case 'builderOrder': case 'builderPause': case 'builderReserve': case 'builderDoctrine': builderCommand(this,c); break;
+      case 'rally': this.setRally(c.x,c.z,c.p || 0); break;
       case 'stance': this.setStance(c.s, c.p || 0); break;
       case 'choose': this.chooseBranch(c.id, c.b, c.p || 0); break;
       case 'towerpri': this.cycleTowerPriority(c.p || 0); break;
@@ -3552,13 +3584,11 @@ export class Game {
       const id = this.occ[(z | 0) * this.map.size + (x | 0)];
       return id === 0 || this.gateIds.has(id);
     };
-    // Hero input keeps the grid corner rule. Off-centre squads follow smooth
-    // field headings: check their actual swept segment, not only its endpoint
-    // (corner tunneling) or both side cells (rejects legal turns and stalls).
-    const canStep = (x,z) => pass(x,z) && (a.hero
-      ? ((x|0)===(a.x|0) || (z|0)===(a.z|0) || (pass(x,a.z) && pass(a.x,z)))
-      : segOpen(a.x,a.z,x,z,(tx,tz)=>pass(tx+.5,tz+.5))
-    );
+    // Use the exact swept segment for heroes as well as squads. Requiring
+    // BOTH neighbour cells for every diagonal endpoint crossing rejected
+    // legal off-centre turns that the path planner had accepted, producing
+    // an endless forward/backward oscillation at corners.
+    const canStep = (x,z) => pass(x,z) && segOpen(a.x,a.z,x,z,(tx,tz)=>pass(tx+.5,tz+.5));
     // Standing in rock or inside a footprint (a wall raised on top of us, a
     // doorstep on a cliff lip): walk straight to the nearest open tile first.
     // Sliding about inside the footprint used to pin squads in wall tiles.
@@ -4175,6 +4205,8 @@ export class Game {
     if(u.hp>0)spellOnAttackTaken(this,u,attackSource);
     if (u.hp <= 0) {
       u.dead = true;
+      if (!u.hero && u.expeditionOwner != null) this.expeditionLosses[u.expeditionOwner] = (this.expeditionLosses[u.expeditionOwner] || 0) + 1;
+      if (!u.hero) this.stats.troopsLost = (this.stats.troopsLost || 0) + 1;
       if(attackSource)attackSource.killCount=(attackSource.killCount||0)+1;
       this.emit({ type: 'udeath', x: u.x, z: u.z });
       if (u.hero) {

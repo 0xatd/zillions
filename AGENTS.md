@@ -1,3 +1,13 @@
+## Party and Custom Battle language (Alex, 2026-11-27)
+
+Main-game grouping is **Parties**, not a separate Co-op mode: WoW-style persistent
+social parties within the shared Bannerlord-style space world. Members can
+travel together or separately and join encounters. Custom Battles is the separate
+WC3 Reforged-style game browser/map/lobby/Ready experience. Joining or leaving a
+custom lobby must not replace persistent world-party membership. Legacy internal
+`coop` transport identifiers can remain for compatibility; player-facing copy
+must distinguish party membership from temporary battle participation.
+
 # AGENTS.md
 
 ## Social and Custom Battles (Alex, 2026-11-26)
