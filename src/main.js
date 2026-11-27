@@ -26,7 +26,8 @@ import { surveySite } from './plots.js';
 import { Game, runScore, isCompatibleSnapshot } from './game.js';
 import { UI } from './ui.js';
 import { AudioSys } from './audio.js';
-import { loadAssets, loadKitCulture, assetClone, assetPart, hasKit, kitClone, kitMaterials, kitGeometry } from './assets.js';
+import { loadAssets, reloadMarineHeroes, releaseRetiredHeroTextures, loadKitCulture, assetClone, assetPart, hasKit, kitClone, kitMaterials, kitGeometry } from './assets.js';
+import { allowsSeparateWeaponRecoil, applyTwoHandArms, marineHeroHasLod, marineHeroUsesLod, materialTextures, twoHandArmCues } from './marine-hero-art.js';
 import { loadMarineKit, marineKitReady, marineForUnit, setMarineLod, MARINE_FLAGS } from './marine-assembler.js';
 import { NetSession } from './net.js';
 import { getSupabaseClient } from './supabase.js';
@@ -194,7 +195,10 @@ class App {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(30, 1, 0.5, 600);
     this.tacticalVisuals = new TacticalVisuals(this.renderer, this.scene, this.camera, boot);
-    this.tacticalVisuals.onChange = () => this._applyShadowBudget();
+    this.tacticalVisuals.onChange = () => {
+      this._applyShadowBudget();
+      this._syncMarineHeroDetail();
+    };
     this.tacticalVisuals.onResize = () => this.resize();
     if (perfHudWanted()) this.perfHud = mountPerfHud();
     this._frustum = new THREE.Frustum();
@@ -6652,9 +6656,13 @@ class App {
     // The kit loads alongside the art so the first troops already use it.
     const marineKit = MARINE_FLAGS.units ? loadMarineKit().catch(() => false) : null;
     if (!this._artLoading) {
-      this._artLoading = loadAssets().then(() => marineKit).then(() => {
+      const marineHeroQuality = this.tacticalVisuals?.choice || 'auto';
+      this._marineHeroLod = marineHeroUsesLod(marineHeroQuality);
+      this._artLoading = loadAssets({ marineHeroQuality }).then(() => marineKit).then(() => {
         this.assetsLoaded = true;
         setMapKit(kitGeometry);
+        const choiceNow = this.tacticalVisuals?.choice || 'auto';
+        if (marineHeroUsesLod(choiceNow) !== this._marineHeroLod) this._syncMarineHeroDetail();
         if (hasKit('enemy_walker') && this.horde) {
           this.horde.dispose();
           this.horde = new HordeArt(this.scene, ZMAX, kitGeometry);
@@ -6663,6 +6671,37 @@ class App {
       });
     }
     return this._artLoading;
+  }
+
+  // Low uses the hero LOD file. Medium, High, and Auto keep the full GLB.
+  // Reloads are chained so a quick toggle cannot finish out of order.
+  _syncMarineHeroDetail() {
+    if (!MARINE_FLAGS.heroes || !this.assetsLoaded) return;
+    const choice = this.tacticalVisuals?.choice || 'auto';
+    const low = marineHeroUsesLod(choice);
+    if (low === this._marineHeroLod) return;
+    this._marineHeroLod = low;
+    const generation = (this._marineHeroGeneration = (this._marineHeroGeneration || 0) + 1);
+    const apply = () => reloadMarineHeroes(choice).then(() => {
+      if (generation !== this._marineHeroGeneration) return;
+      this._dropMarineHeroLodMeshes();
+    }).finally(() => {
+      // Clones shared the retired template's albedo and normal map. Free both
+      // only after those meshes are gone. A superseded reload leaves the
+      // batch for the reload that actually drops the meshes.
+      if (generation === this._marineHeroGeneration) releaseRetiredHeroTextures();
+    });
+    this._marineHeroJob = Promise.resolve(this._marineHeroJob).then(apply, apply);
+  }
+
+  _dropMarineHeroLodMeshes() {
+    if (!this.unitMeshes) return;
+    for (const [id, rec] of this.unitMeshes) {
+      if (!rec.u?.hero || !marineHeroHasLod(rec.u.key)) continue;
+      this.scene.remove(rec.mesh);
+      this._disposeObject3D(rec.mesh);
+      this.unitMeshes.delete(id);
+    }
   }
 
   _setupZombieMeshes() {
@@ -7441,7 +7480,7 @@ class App {
       if (o.userData.ink) return; // shared ink-outline material
       const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
       for (const mat of mats) {
-        if (mat.map) mat.map.dispose();
+        for (const texture of materialTextures(mat)) texture.dispose();
         mat.dispose();
       }
     });
@@ -7492,6 +7531,9 @@ class App {
           legL: assetPart(marineHero, 'leg_l'), legR: assetPart(marineHero, 'leg_r'),
           armL: assetPart(marineHero, 'arm_l'), armR: assetPart(marineHero, 'arm_r'),
         };
+        // twoHanded comes from asset_root.extras on the GLB, not from the hero key.
+        g.userData.marineHero = true;
+        g.userData.twoHanded = marineHero.userData.twoHanded === true;
       } else if (kit) {
         // Toy-kit hero figurine on its hoverbike (Scott / Alexander / Daniel).
         // Mounted heroes remain larger than infantry, not house-sized.
@@ -7769,8 +7811,19 @@ class App {
         const stride = pose.stride;
         if (limbs.legL) limbs.legL.rotation.x = stride;
         if (limbs.legR) limbs.legR.rotation.x = -stride;
-        if (limbs.armL) limbs.armL.rotation.x = -stride * 0.55 - attackPulse * 0.45 - (artState === 'cast' ? cuePulse * 1.05 : 0);
-        if (limbs.armR) limbs.armR.rotation.x = stride * 0.55 - attackPulse * 0.65 - (artState === 'cast' ? cuePulse * 1.05 : 0);
+        if (rec.mesh.userData.twoHanded) {
+          applyTwoHandArms(limbs, twoHandArmCues({
+            stride,
+            attacking: !!(u.hero && u.attack),
+            attackT: u.attack?.t ?? 0,
+            attackDuration: u.attack?.duration ?? 0,
+            attackRecovery: u.hero ? (u.attackRecovery || 0) : 0,
+            cast: artState === 'cast' ? cuePulse : 0,
+          }));
+        } else {
+          if (limbs.armL) limbs.armL.rotation.x = -stride * 0.55 - attackPulse * 0.45 - (artState === 'cast' ? cuePulse * 1.05 : 0);
+          if (limbs.armR) limbs.armR.rotation.x = stride * 0.55 - attackPulse * 0.65 - (artState === 'cast' ? cuePulse * 1.05 : 0);
+        }
       }
       const marineNode = rec.mesh.userData.marineNode;
       if (marineNode) {
@@ -7783,7 +7836,7 @@ class App {
         }
         setMarineLod(marineNode, low);
       }
-      if (weaponParts.length && attackPulse > 0) {
+      if (weaponParts.length && allowsSeparateWeaponRecoil(rec.mesh.userData.twoHanded === true, attackPulse)) {
         for (const part of weaponParts) {
           const rp = part.userData.restPos;
           const rr = part.userData.restRot;
