@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import '../scripts/resolve-three.mjs';
 
 const THREE = await import('three');
-const { dressMaterial, isPbrMaterial, shadowSpanFor } = await import('../src/presentation.js');
+const { disposePresentationMaterial, dressMaterial, isPbrMaterial, shadowSpanFor } = await import('../src/presentation.js');
 const { MARINE_ANIMATED_GROUPS } = await import('../src/marine-assembler.js');
 const { HEROES } = await import('../src/config.js');
 
@@ -32,6 +32,42 @@ test('Low dresses PBR down to Lambert and High puts the original back', () => {
   assert.equal(high.clearcoat, 0.5);
   assert.equal(high.normalMap, normal);
   assert.equal(high.metalness, 0.25);
+});
+
+test('disposing either quality variant releases the hidden one too', () => {
+  const source = new THREE.MeshStandardMaterial({ color: 0x336699 });
+  const map = new THREE.DataTexture(new Uint8Array([8, 8, 8, 255]), 1, 1);
+  source.map = map;
+  const low = dressMaterial(source, false);
+  const high = dressMaterial(low, true);
+  assert.equal(high, source);
+  assert.equal(source.userData.lambertStandIn, low);
+  const disposed = [];
+  source.addEventListener('dispose', () => disposed.push('pbr'));
+  low.addEventListener('dispose', () => disposed.push('lambert'));
+  let maps = 0;
+  map.addEventListener('dispose', () => { maps += 1; });
+  disposePresentationMaterial(low);
+  assert.deepEqual(disposed.sort(), ['lambert', 'pbr']);
+  assert.equal(maps, 1);
+  const fresh = new THREE.MeshStandardMaterial({ color: 0x112233 });
+  const stand = dressMaterial(fresh, false);
+  const fromHigh = [];
+  fresh.addEventListener('dispose', () => fromHigh.push('pbr'));
+  stand.addEventListener('dispose', () => fromHigh.push('lambert'));
+  disposePresentationMaterial(fresh);
+  assert.deepEqual(fromHigh.sort(), ['lambert', 'pbr']);
+});
+
+test('a shared kit material stays when a mesh is disposed', () => {
+  const source = new THREE.MeshStandardMaterial({ color: 0x111111 });
+  source.userData.kitShared = true;
+  const low = dressMaterial(source, false);
+  let disposed = false;
+  source.addEventListener('dispose', () => { disposed = true; });
+  low.addEventListener('dispose', () => { disposed = true; });
+  disposePresentationMaterial(low);
+  assert.equal(disposed, false);
 });
 
 test('Lambert and basic materials are left alone', () => {

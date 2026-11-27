@@ -60,6 +60,7 @@ function lambertStandIn(source) {
     });
     stand.userData.pbrSource = source;
     stand.userData.presentationStandIn = true;
+    source.userData.lambertStandIn = stand;
     if (source.userData.kitShared) stand.userData.kitShared = true;
     LAMBERT.set(source, stand);
   }
@@ -86,6 +87,24 @@ export function dressMaterial(material, pbr) {
   }
   if (isPbrMaterial(material)) configurePbrMaterial(material);
   return material;
+}
+
+// A quality change keeps the other variant alive so the mesh can switch back.
+// Despawning has to release both, or the hidden PBR program (or the Lambert
+// stand-in) stays in the renderer. Shared kit materials are left in place.
+export function disposePresentationMaterial(material, seen = new Set()) {
+  if (!material || seen.has(material)) return;
+  seen.add(material);
+  if (material.userData?.kitShared || material.userData?.ink) return;
+  const pair = material.userData?.pbrSource || material.userData?.lambertStandIn || null;
+  if (material.userData?.pbrSource) LAMBERT.delete(material.userData.pbrSource);
+  if (LAMBERT.has(material)) LAMBERT.delete(material);
+  if (material.map && !seen.has(material.map)) {
+    seen.add(material.map);
+    material.map.dispose();
+  }
+  material.dispose();
+  if (pair && pair !== material) disposePresentationMaterial(pair, seen);
 }
 
 export function dressObject(root, pbr) {

@@ -59,7 +59,7 @@ import { highestUnlockedLevel, roomLevelEligibility } from './multiplayer-eligib
 import { adaptiveWindowTarget, consecutiveWindowCount, hasConsecutiveWindowBuffer, rememberWindow, stallRecovery } from './multiplayer-pacing.js';
 import { FrameGuard, recoverableRestore } from './runtime-guard.js';
 import { buildingArtState, twoHandedArmCues, twoHandedArmPitch, unitArtState, unitPose } from './art-state.js';
-import { applyColorPipeline, createRoomEnvironment, dressObject, shadowSpanFor } from './presentation.js';
+import { applyColorPipeline, createRoomEnvironment, disposePresentationMaterial, dressObject, shadowSpanFor } from './presentation.js';
 import { HordeArt, buildShardGeometry } from './horde-art.js';
 import { buildUnitModel } from './unit-art.js';
 import { buildBuildingMesh } from './building-art.js';
@@ -7468,10 +7468,7 @@ class App {
       if (o.geometry && !o.geometry.userData.kitShared && !o.userData.sharedGeometry) o.geometry.dispose();
       if (o.userData.ink) return; // shared ink-outline material
       const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
-      for (const mat of mats) {
-        if (mat.map) mat.map.dispose();
-        mat.dispose();
-      }
+      for (const mat of mats) disposePresentationMaterial(mat);
     });
   }
 
