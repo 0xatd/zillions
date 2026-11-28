@@ -1182,3 +1182,38 @@ button:disabled {cursor:not-allowed;}
 
 /* Paused world entry stays visible, but is never an active play path. */
 .menu-word.world-paused:disabled, #m-enter-world:disabled {color:#7d8289;opacity:.5;filter:grayscale(1);text-shadow:none;cursor:not-allowed;}
+
+/* Unavailable browser actions must not look like active primary buttons. */
+.custom-actions button:disabled { opacity: .4; filter: grayscale(1); cursor: not-allowed; box-shadow: none; }
+/* The two-column browser must keep a real list track on short laptops/phones.
+   A zero-height 1fr track lets the detail pane cover the map hit targets. */
+@media (min-width:761px) and (max-width:1100px) {
+ #screen-custom {grid-template-rows:auto minmax(180px,1fr) auto auto;}
+}
+@media (min-width:761px) and (max-width:1100px) and (max-height:500px) {
+ #screen-custom {display:grid;grid-template-columns:1fr;grid-template-rows:44px 68px minmax(0,1fr) 42px 54px;grid-template-areas:"head" "nav" "list" "detail" "actions";gap:4px;padding:4px 12px;}
+ #screen-custom .custom-head {padding:4px 10px;grid-template-columns:80px 1fr;gap:10px;}
+ #screen-custom .custom-head h1 {font-size:18px;}
+ #screen-custom .custom-head > div > span,#screen-custom .custom-identity {display:none;}
+ #screen-custom .custom-nav {display:grid;grid-template-columns:140px 100px 1fr;grid-template-rows:28px 28px;gap:4px;padding:4px 8px;}
+ #screen-custom .custom-primary-tab {padding:4px 8px;font-size:11px;}
+ #screen-custom .custom-filter-group {grid-column:3;grid-row:1;display:flex;gap:4px;margin:0;}
+ #screen-custom .custom-filter-group > span {display:none;}
+ #screen-custom .custom-filter {padding:4px 8px;font-size:10px;}
+ #screen-custom .custom-nav label {margin:0;min-width:0;display:flex;align-items:center;gap:8px;grid-row:2;grid-column:1/-1;}
+ #screen-custom .custom-nav label:has(#cu-status) {grid-column:1/3;}
+ #screen-custom .custom-nav:has(#cu-status-label:not(.hidden)) label:has(#cu-search) {grid-column:3;}
+ #screen-custom .custom-nav input,#screen-custom .custom-nav select {box-sizing:border-box;padding:4px 8px;min-width:0;}
+ #screen-custom .custom-list-panel {min-height:0;padding:4px 8px;}
+ #screen-custom .custom-list-head {display:none;}
+ #screen-custom .custom-map-row,#screen-custom .custom-live-row {min-height:46px;padding:4px 8px;}
+ #screen-custom .custom-list-panel #cu-note {font-size:10px;}
+ #screen-custom .custom-detail {display:flex;align-items:center;gap:12px;overflow:auto;max-height:none;padding:4px 10px;}
+ #screen-custom .custom-detail h2 {font-size:16px;margin:0;white-space:nowrap;}
+ #screen-custom .custom-detail p {font-size:12px;margin:0;line-height:1.2;}
+ #screen-custom .custom-map-preview,#screen-custom .custom-detail dl,#screen-custom .custom-detail .modeeyebrow {display:none;}
+ #screen-custom .custom-actions {position:static;padding:5px 10px;gap:8px;}
+ #screen-custom .custom-actions button {min-height:40px;padding:6px 14px;}
+}
+/* The global Friends shortcut must not cover the host-dialog Close control. */
+body:has(#cu-create-panel:not(.hidden)) #social-toggle {visibility:hidden;}

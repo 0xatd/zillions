@@ -47,5 +47,13 @@ try{
   }
  }
  assert.deepEqual(errors,[]);assert.equal(await page.evaluate(()=>__app.profile.mmoCharacters?.length||0),0,'custom battle does not create a campaign character');assert.equal(await page.evaluate(()=>__app._customBattle),true);assert.equal(await page.evaluate(()=>__app._match?.world||null),null);
+ if(process.env.QA_IRON_RAIN_STATES){
+  await page.locator('#b-restart').click();
+  await page.locator('#cu-join').waitFor({state:'visible'});
+  assert.equal(await page.locator('#screen-custom').isVisible(),true,'finished custom match returns to browser');
+  await page.locator('#cu-join').click();
+  await page.locator('#s-start').waitFor({state:'visible'});
+  assert.equal(await page.evaluate(()=>__app.ui.selectedLevel),Number(process.env.QA_LEVEL||1),'next match retains selected map');
+ }
  writeFileSync(`${out}/result.json`,JSON.stringify({errors,bounds,checks:['fresh title to map picker','no mandatory character','real start button','starter squad','no world encounter','three viewport captures']},null,2));console.log(JSON.stringify({out,errors,bounds}));
 }finally{await browser.close();await server.close();}

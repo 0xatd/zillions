@@ -339,7 +339,7 @@ export function shellMarkup() {
       </div>
 
       <div id="screen-custom" class="custom-browser shell-screen hidden">
-        <header class="custom-head"><button class="tbtn" id="cu-back" type="button">Back</button><div><span>CUSTOM</span><h1>CUSTOM BATTLES</h1></div><div class="custom-identity"><b id="cu-character">COMMANDER</b><small id="cu-party">MULTIPLAYER</small></div></header>
+        <header class="custom-head"><button class="tbtn" id="cu-back" type="button">Back</button><div><span>CUSTOM</span><h1>CUSTOM GAMES</h1></div><div class="custom-identity"><b id="cu-character">COMMANDER</b><small id="cu-party">MULTIPLAYER</small></div></header>
         <aside class="custom-nav">
           <button class="custom-primary-tab sel" data-view="live" type="button">BROWSE GAMES</button>
           <button class="custom-primary-tab" data-view="arcade" type="button">MAPS</button>

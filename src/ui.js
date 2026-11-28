@@ -901,6 +901,8 @@ export class UI {
         if (this._arcadeFilter === 'recent') return (this._arcadeRecent || []).includes(map.id);
         return true;
       });
+      // Actions must refer to a visible selection, never a filtered-out map.
+      this._selectedArcadeMap = maps.find(map => map.id === this._selectedArcadeMap?.id) || null;
       note.textContent = maps.length ? `${maps.length} prebuilt maps · select one to play or host` : 'No maps match these filters.';
       note.classList.remove('offline');
       for (const map of maps) {
@@ -929,6 +931,8 @@ export class UI {
       if (status === 'playing' && game.status === 'open') return false;
       return !query || `${game.name} ${game.host_name} ${game.mapName || ''} ${game.mode || ''}`.toLowerCase().includes(query);
     });
+    // Refresh/filter changes can remove or update a selected room.
+    this._selectedCustomGame = games.find(game => game.id === this._selectedCustomGame?.id) || null;
     note.textContent = this._customOffline
       ? '📡 Offline — Live Games needs the lobby server.'
       : games.length ? `${games.length} live games found` : 'No joinable games. Host one or browse Arcade.';
@@ -2346,7 +2350,7 @@ export class UI {
   }
 
   _syncChapterHeroChoice(mode) {
-    const character = mode === 'campaign' ? this._sheetCharacter() : null;
+    const character = mode === 'campaign' && !this._customBattle ? this._sheetCharacter() : null;
     const previous = this.selectedHero;
     if (character) {
       this.selectedHero = character.proxyHero;
@@ -2399,7 +2403,7 @@ export class UI {
     const diffLabel = setupScreen.querySelector('.diff-label');
     if (fieldLabel) fieldLabel.innerHTML = online ? 'MAP &amp; MISSION <span id="warstatus" class="warstatus"></span>' : 'Battlefield <span id="warstatus" class="warstatus"></span>';
     if (heroLabel) heroLabel.innerHTML = online ? 'YOUR HERO <small>Choose the character kit you bring into this room.</small>' : 'Your hero <small>— right-click to move or attack-move. Abilities are <span data-bind-label="ability1"></span> <span data-bind-label="ability2"></span> <span data-bind-label="ability3"></span> <span data-bind-label="ability4"></span>.</small>';
-    if (heroLabel && mode === 'campaign' && this._sheetCharacter()) heroLabel.innerHTML = 'EXPEDITION LEADER <small>Selected in your chapter. Go back to change leader or equipment.</small>';
+    if (heroLabel && mode === 'campaign' && !this._customBattle && this._sheetCharacter()) heroLabel.innerHTML = 'EXPEDITION LEADER <small>Selected in your chapter. Go back to change leader or equipment.</small>';
     if (diffLabel) diffLabel.textContent = online ? 'ROOM DIFFICULTY' : 'Difficulty';
     // Multiplayer setups choose the war mode here; solo modes chose it on the
     // Play Solo card, so the chips would be a second, contradictory entrance.
@@ -4147,7 +4151,7 @@ export class UI {
         <div class="endactions">
           ${!extra?.customBattle && !won && mode === 'campaign' && this.cb.canRetry?.(game) ? '<button class="startbtn" id="b-retry">Retry mission</button>' : ''}
           ${Array.isArray(game?.inputLog) ? '<button class="startbtn" id="b-share-replay" type="button">Share replay</button>' : ''}
-          <button class="startbtn primary" id="b-restart">${extra?.customBattle ? 'Back to Custom Battles' : daily ? 'Back to title' : mode === 'campaign' ? 'Return to world' : won ? 'Continue' : 'Try again'}</button>
+          <button class="startbtn primary" id="b-restart">${extra?.customBattle ? 'Back to Custom Games' : daily ? 'Back to title' : mode === 'campaign' ? 'Return to world' : won ? 'Continue' : 'Try again'}</button>
         </div>
         <p id="replay-share-note" class="tagline hidden"></p>
       </div>`;

@@ -2186,6 +2186,15 @@ class App {
       setTimeout(() => this.startGame(retry.difficulty || 'normal', retry.hero), 0);
       return;
     }
+    // Custom Games is the active entry point even for signed-in accounts.
+    // Hydrate existing world data above, but never require a world character.
+    if (!WORLD_PLAY_ENABLED && status.signedIn && !status.needsUsername && !this._authenticatedEntryHandled) {
+      this._authenticatedEntryHandled = true;
+      this.ui._accountAccepted = true;
+      sessionStorage.removeItem('zillions-return-to-world');
+      if (!this.game && !this._preparingBattlefield) this._openCustomGames();
+      return;
+    }
     if (status.signedIn && sessionStorage.getItem('zillions-return-to-world') === '1') {
       sessionStorage.removeItem('zillions-return-to-world');
       // Returning from a finished run: straight back to mission select.
@@ -2871,7 +2880,7 @@ class App {
   }
 
   async _pickHero(key) {
-    if ((this.ui.selectedMode || 'campaign') === 'campaign' && this.ui.selectedLeader && leaderHeroKey(this.ui.selectedLeader) === key) {
+    if ((this.ui.selectedMode || 'campaign') === 'campaign' && !this._isCustomBattle() && this.ui.selectedLeader && leaderHeroKey(this.ui.selectedLeader) === key) {
       try {
         const character = await this._bindDeployedLeader(this.ui.selectedLeader);
         if (character?.proxyHero) key = character.proxyHero;
