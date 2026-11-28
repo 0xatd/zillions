@@ -38,3 +38,12 @@ No merge, deployment, production migration or authenticated staging claim. Earli
 ![Landscape map browser](custom-navigation-20261128/maps-landscape.png)
 
 Final landscape measurement: three complete rows between y128–274, selected objective y287–328, actions y333–386 on 844×390. The details pane no longer covers map clicks. `profile-negative-control.log` retains the saved-character hero-lock failure before its fix.
+
+## Settled verification
+
+- Final `npm run check`: exit 0, **347 tests passed, zero failed**, plus required script checks (`check-final.log`).
+- Final local `vercel build --prod --yes`: exit 0 (`build-settled.log`). This builds locally; it is not a production deployment.
+- Final navigation browser journey: exit 0 for all three viewports (`navigation-final.log`), including saved-character and refreshed-room fixture regressions.
+- Battle/result/browser/next-setup journey: exit 0 (`journey.log`).
+- Syntax and scoped `git diff --check`: passed.
+- All changes integrated into the existing draft PR #165. No merge or production deployment. Reference video review remains blocked solely on locating the recording.
