@@ -48,7 +48,7 @@ export const REPLAY_LIMITS = Object.freeze({
 // Fields of a report the replay must reproduce exactly.
 export const REPLAY_FIELDS = Object.freeze([
   'won', 'durationSeconds', 'threatLevel', 'kills', 'coins', 'nests', 'nodes', 'built', 'lost',
-  'bestHeld', 'heroDeaths', 'bossKillT', 'hqTier', 'standingBuildings', 'pack',
+  'expeditionLosses', 'bestHeld', 'heroDeaths', 'bossKillT', 'hqTier', 'standingBuildings', 'pack',
 ]);
 
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
@@ -71,6 +71,7 @@ export function validateReplayPayload(raw) {
     if (typeof k !== 'string' || !HEROES[k]) return fail('invalid_replay', 'hero');
     heroes.push(typeof entry === 'string' ? k : { k, camp: isObj(entry.camp) ? entry.camp : null });
   }
+  if (raw.worldArmy != null && (!Array.isArray(raw.worldArmy) || raw.worldArmy.length > heroes.length || raw.worldArmy.some(n => !Number.isInteger(n) || n < 0 || n > 40))) return fail('invalid_replay', 'worldArmy');
   const log = raw.log;
   if (!Array.isArray(log) || log.length > REPLAY_LIMITS.maxLogEntries) return fail('invalid_replay', 'log');
   let last = 0;
@@ -85,6 +86,7 @@ export function validateReplayPayload(raw) {
     ok: true,
     replay: {
       v: REPLAY_VERSION, frames, heroIndex, heroes, log,
+      ...(raw.worldArmy?.length ? {worldArmy:[...raw.worldArmy]} : {}),
       character: isObj(raw.character) ? raw.character : null,
       culture: typeof raw.culture === 'string' && Object.hasOwn(CULTURE_ARMIES, raw.culture) ? raw.culture : DEFAULT_CULTURE,
     },
@@ -155,7 +157,7 @@ export function replayMatch({ levelId, mode, difficulty, seed, replay, now = () 
   let game;
   try {
     const map = new TerrainField(level.seed, level.theme, { size: level.size, nests: level.nests });
-    game = new Game(map, difficulty, replay.heroes, null, levelId, mode, { rngSeed: seed, culture: replay.culture });
+    game = new Game(map, difficulty, replay.heroes, null, levelId, mode, { rngSeed: seed, culture: replay.culture, worldArmy: mode === 'campaign' ? replay.worldArmy : [] });
   } catch (error) {
     return { status: 'invalid', error: 'replay_setup_failed', detail: String(error?.message || error).slice(0, 120) };
   }
@@ -206,7 +208,7 @@ export function diffReports(claimed, replayed) {
       if ((a == null) !== (b == null) || (a != null && Math.abs(Number(a) - Number(b)) > 0.15)) out.push(key);
     } else if (key === 'won') {
       if (!!a !== !!b) out.push(key);
-    } else if (Number(a) !== Number(b)) out.push(key);
+    } else if (key === 'expeditionLosses' ? Number(a || 0) !== Number(b || 0) : Number(a) !== Number(b)) out.push(key);
   }
   return out;
 }

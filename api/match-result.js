@@ -147,7 +147,7 @@ export function reviewForReport({ report, ticket, body, context, serverElapsedSe
   const checked = validateReplayPayload(body.replay);
   const players = checked.ok && Array.isArray(checked.replay.heroes) ? checked.replay.heroes.length : 1;
   if (!checked.ok || (!ticket.rid && players !== 1)) return { reasons: [...reasons, 'invalid_log'], flagged, log: null };
-  return { reasons, flagged, log: withServerCamp(checked.replay, serverHero(context)) };
+  return { reasons, flagged, log: { ...withServerCamp(checked.replay, serverHero(context)), worldArmy: ticket.world ? ticket.world.army || [ticket.world.troops] : [] } };
 }
 
 // The whole decision, separated from HTTP so tests can drive it with a fake

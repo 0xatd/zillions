@@ -1,3 +1,27 @@
+
+## Iron Rain scenario style — 2026-11-27
+
+Alex approved the six build/defend/conquer rules for this style only and chose **Iron Rain** (planetary invasion / Red Rising inspiration). Implement against existing maps first. Shared rules and explicit exceptions: `docs/iron-rain.md`. A narrated playthrough/map tour is intended to reveal reusable mechanics and map-specific variation, not just support a one-to-one layout copy. Do not treat proposed reference timings as verified original-map rules.
+
+
+## Custom Games-only direction — Alex, 2026-11-27 21:15 UTC
+
+Enter World stays gray and disabled. Custom Games is the only active play/development path. Start with the existing maps; then attempt to rebuild the Custom Castle Defense reference map in Three.js. Good, approved standalone scenarios may eventually be reused in the overworld; that integration is not current scope. Preserve world code and progression.
+
+## Current scope override — 2026-11-27
+
+Alex explicitly paused overworld/campaign expansion. The active goal is futuristic Custom Castle Defense in Zillions style: first prove the core, then several distinct fun maps, with three documented polish passes. Preserve world/roster work on `codex/reference-integration-20261127` (checkpoint6decb54); do not resume without Alex. Earlier shared-world/Enter World navigation requirements below are historical and superseded for this core branch. Retain accounts/saves; do not delete user progression. Custom map play should be reachable directly without world travel or mandatory character creation.
+
+## Party and Custom Battle language (Alex, 2026-11-27)
+
+Main-game grouping is **Parties**, not a separate Co-op mode: WoW-style persistent
+social parties within the shared Bannerlord-style space world. Members can
+travel together or separately and join encounters. Custom Battles is the separate
+WC3 Reforged-style game browser/map/lobby/Ready experience. Joining or leaving a
+custom lobby must not replace persistent world-party membership. Legacy internal
+`coop` transport identifiers can remain for compatibility; player-facing copy
+must distinguish party membership from temporary battle participation.
+
 # AGENTS.md
 
 ## Social and Custom Battles (Alex, 2026-11-26)

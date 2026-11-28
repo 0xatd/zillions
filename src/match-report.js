@@ -25,6 +25,7 @@ export function buildMatchReport(game, { won = game?.won, heroIndex = 0, heroKey
     threatLevel: g.threatLevel | 0,
     kills: s.kills | 0, coins: Math.floor(s.coins || 0), nests: s.nests | 0, nodes: s.nodes | 0,
     built: s.built | 0, lost: s.lost | 0, bestHeld: s.bestHeld | 0, heroDeaths: s.heroDeaths | 0,
+    expeditionLosses: g.expeditionLosses?.[heroIndex] || 0,
     bossKillT: s.bossKillT == null ? null : Number(s.bossKillT),
     hqTier: hq?.tier | 0,
     standingBuildings: standing,

@@ -364,6 +364,7 @@ export class AuthClient {
     return {
       when: Number(data.summary?.when || 0) || Date.parse(data.updated_at || '') || Date.now(),
       snap: data.snapshot,
+      ...(data.summary?.world ? {world:data.summary.world,roomId:data.summary.roomId||null} : {}),
     };
   }
 
@@ -383,6 +384,7 @@ export class AuthClient {
         difficulty: snap.diff,
         level: snap.level || 1,
         players: snap.heroKeys?.length || 1,
+        ...(save.world ? {world:save.world,roomId:save.roomId||null} : {}),
       },
       snapshot: snap,
     }, { onConflict: 'user_id,slot_key' });

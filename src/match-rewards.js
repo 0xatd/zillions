@@ -204,13 +204,14 @@ export function validateMatchReport(raw, { campaignCleared = 0, lootTable = null
     built: n('built', durationSeconds * L.builtPerSecond + L.builtSlack),
     bestHeld: n('bestHeld', L.maxHeld),
     heroDeaths: n('heroDeaths', durationSeconds),
+    expeditionLosses: n('expeditionLosses',40),
     hqTier: n('hqTier', PLOT_KINDS.hq.tiers.length),
     hero: typeof raw.hero === 'string' ? raw.hero.replace(/[^a-z0-9_]/gi, '').slice(0, 32) || null : null,
   };
   // Threat depends on the (already bounded) captures and razes.
   report.threatLevel = report.nodes === null || report.nests === null ? null
     : n('threatLevel', maxThreatLevel({ durationSeconds, levelId, difficulty, nodes: report.nodes, nests: report.nests }));
-  for (const key of ['kills', 'coins', 'nests', 'nodes', 'threatLevel', 'built', 'bestHeld', 'heroDeaths', 'hqTier']) {
+  for (const key of ['kills', 'coins', 'nests', 'nodes', 'threatLevel', 'built', 'bestHeld', 'heroDeaths', 'expeditionLosses', 'hqTier']) {
     if (report[key] === null) return fail('implausible_report', key);
   }
   report.lost = n('lost', report.built + L.startingBuildings);

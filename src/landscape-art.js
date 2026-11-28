@@ -82,9 +82,15 @@ export function buildForest(map){
     if(map.tiles[map.idx(x,z)]!==TILE.FOREST)continue;
     const grove=patch(x*.09,z*.09,2);
     if(rng()>profile.trees.density+grove*.3)continue;
+    // Grove interiors form a taller silhouette while the route-facing fringe
+    // stays low. Root positions and crown width remain on the existing mask;
+    // only vertical mass changes, so no decorative trunk blocks a passage.
+    const interior=[[1,0],[-1,0],[0,1],[0,-1]].every(([dx,dz])=>map.tiles[map.idx(x+dx,z+dz)]===TILE.FOREST);
     const s=.68+rng()*.42;
-    const spot={x:x+.25+rng()*.5,z:z+.25+rng()*.5,sx:s,sy:s*(.9+rng()*.3)*profile.trees.height,sz:s,r:rng()*Math.PI*2};
-    c.copy(base).offsetHSL((grove-.5)*.055,-.03,(grove-.5)*.07);
+    const crownLift=interior ? 1.22+grove*.20 : .92;
+    const spot={x:x+.25+rng()*.5,z:z+.25+rng()*.5,sx:s,sy:s*(.9+rng()*.3)*profile.trees.height*crownLift,sz:s,r:rng()*Math.PI*2};
+    c.copy(base).offsetHSL((grove-.5)*.04,.025,(grove-.5)*.085);
+    if(interior)c.multiplyScalar(.88);
     const conifer=rng()<profile.trees.conifers;
     if(conifer)c.multiplyScalar(.85);
     spot.color=c.getHex();(conifer?pines:oaks).push(spot);

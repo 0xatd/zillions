@@ -137,3 +137,11 @@ export async function accountUpgradeRequest(action, payload = {}) {
   if (!response.ok) throw Object.assign(new Error(result?.error || 'account_upgrade_failed'), { status: response.status, result });
   return result;
 }
+
+export async function worldRequest(action, payload = {}) {
+  if (!backendEnabled() || !accountSession?.access_token) throw new Error('sign_in_required');
+  const response=await fetch('/api/world',{method:'POST',headers:accountHeaders({'content-type':'application/json'}),body:JSON.stringify({action,...payload})});
+  const result=await response.json().catch(()=>null);
+  if(!response.ok||!result?.ok)throw Object.assign(new Error(result?.error||'world_service_unavailable'),{status:response.status});
+  return result;
+}

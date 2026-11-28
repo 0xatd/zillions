@@ -30,7 +30,7 @@ export function firstHourGuidance(character, { online = true } = {}) {
     forge: ['Tune one item at the Forge', 'Add or calibrate a socket, or install a component. The workbench shows its exact stat effect.', 'OPEN FORGE'],
     mission: ['Hold your first siege', 'Pick a campaign mission and defend it. Signed-in XP, loot and Alloy are granted by the server when the siege ends.', 'DEPLOY'],
     offline: ['Deploy now or sign in for persistent gear', 'Market and Forge require a signed-in account. You can deploy and play a campaign mission now.', 'DEPLOY'],
-    complete: ['You are ready', 'Push deeper into the campaign, run survival, or bring friends into co-op.', 'MISSIONS'],
+    complete: ['You are ready', 'Push deeper into the campaign, run survival, or form a party with friends.', 'MISSIONS'],
   }[step];
   return { step, title: content[0], body: content[1], action: content[2] };
 }

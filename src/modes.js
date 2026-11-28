@@ -1,3 +1,6 @@
+// World implementation is preserved while custom scenarios are the active scope.
+export const WORLD_PLAY_ENABLED = false;
+
 // Play hub catalog. Built modes are playable. Coming-soon modes stay visible,
 // disabled, and labelled. Setup options name the cards the mission screen shows.
 
@@ -5,11 +8,11 @@ export const MODES = Object.freeze([
   {
     id: 'campaign',
     tab: 'campaign',
-    name: 'Enter the Overworld',
+    name: 'Enter World',
     art: 'earth',
     players: '1',
     ranked: false,
-    status: 'built',
+    status: 'paused',
     buttonId: 'm-enter-world',
     blurb: 'Choose an Earth campaign site to deploy the siege. Strategic travel is coming soon.',
     setup: ['site', 'difficulty'],
@@ -102,7 +105,7 @@ export const MODES = Object.freeze([
 
 export const PLAY_TABS = Object.freeze([
   { id: 'campaign', name: 'Campaign' },
-  { id: 'coop', name: 'Co-op' },
+  { id: 'coop', name: 'Other battles' },
   { id: 'versus', name: 'Versus' },
   { id: 'custom', name: 'Custom' },
 ]);

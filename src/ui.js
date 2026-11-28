@@ -1,3 +1,5 @@
+import {assembleBattleHUD, abilityGlyph, itemGlyph, hudGlyph} from './battle-hud-art.js';
+import { battlefieldAwareness } from './battlefield-awareness.js';
 import { LEADER_ARCHETYPES } from './leader-archetypes.js';
 import { heroCopy, bearing } from './campaign-presentation.js';
 import { publicRoomSetup } from './lobby-reliability.js';
@@ -44,7 +46,7 @@ import {
 import { matchBlocksShell } from './shell-state.js';
 import { NavRouter } from './nav/router.js';
 import { shellMarkup } from './shell-markup.js';
-import { renderToasts, menuFocus } from './ui-kit.js';
+import { icon, renderToasts, menuFocus } from './ui-kit.js';
 import { VENDORS, vendorEligibility, vendorRotation, vendorStock, vendorSellPrice, buyVendorItem, sellVendorItem } from './vendor.js';
 import { runEconomyMutation } from './economy.js';
 import { COMPONENTS, CRAFTING_MATERIALS, RECIPES, componentMods } from './crafting.js';
@@ -83,15 +85,48 @@ export class UI {
 
   _buildDOM() {
     this.root.innerHTML = shellMarkup();
+    assembleBattleHUD(this.root);
 
     // ----- main menu -----
     const q = (s) => this.root.querySelector(s);
+    // Minimap input is camera-only: never turn looking around into a hero order.
+    const minimap = q('#minimap-top');
+    minimap.title = 'Click or drag to move the camera';
+    minimap.setAttribute('aria-label', 'Battlefield minimap. Click or drag to move the camera.');
+    let minimapPointer = null;
+    const lookOnMinimap = event => {
+      const game = this._minimapGame;
+      if (!game || game.over || !this.overlayHidden()) return;
+      const rect = minimap.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const fraction = (value, origin, size) => Math.max(0, Math.min(1, (value - origin) / size));
+      this.cb.onLook?.(fraction(event.clientX, rect.left, rect.width) * game.map.size,
+        fraction(event.clientY, rect.top, rect.height) * game.map.size);
+    };
+    minimap.addEventListener('contextmenu', event => event.preventDefault());
+    minimap.addEventListener('pointerdown', event => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      minimapPointer = event.pointerId;
+      minimap.setPointerCapture(event.pointerId);
+      lookOnMinimap(event);
+    });
+    minimap.addEventListener('pointermove', event => { if (event.pointerId === minimapPointer) lookOnMinimap(event); });
+    const releaseMinimap = event => {
+      if (event.pointerId !== minimapPointer) return;
+      minimapPointer = null;
+      if (minimap.hasPointerCapture(event.pointerId)) minimap.releasePointerCapture(event.pointerId);
+    };
+    minimap.addEventListener('pointerup', releaseMinimap);
+    minimap.addEventListener('pointercancel', releaseMinimap);
+    minimap.addEventListener('lostpointercapture', () => { minimapPointer = null; });
     q('#battle-details-content').onclick = event => {
       const button=event.target.closest('[data-focus-enemy]');
       if(button && !button.disabled)this.cb.onFocusEnemy?.(button.dataset.focusEnemy==='clear'?null:Number(button.dataset.focusEnemy));
     };
     q('#battle-details-close').onclick = () => { this._battlePanel = null; q('#battle-details').classList.add('hidden'); };
     q('#builder-toggle').onclick = () => {const open=q('#builder-options').classList.toggle('hidden')===false;q('#builder-toggle').setAttribute('aria-expanded',String(open));};
+    for (const button of this.root.querySelectorAll('[data-worker]')) button.onclick = () => this.cb.onBuilder?.({t:'builderOrder',s:button.dataset.worker});
     q('#builder-order').onchange = e => this.cb.onBuilder?.({t:'builderOrder',s:e.target.value});
     for(const kind of ['tower','wall'])q('#builder-'+kind).onchange=e=>this.cb.onBuilder?.({t:'builderDoctrine',kind,branch:e.target.value});
     q('#builder-pause').onclick = () => this.cb.onBuilder?.({t:'builderPause',on:!this._builderPaused});
@@ -117,7 +152,7 @@ export class UI {
     q('#a-offline').onclick = () => { this._offlineAccepted = true; if (this.cb.onOfflineContinue) this.cb.onOfflineContinue(); };
     q('#a-credits').onclick = () => this._showScreen('credits');
     q('#a-settings').onclick = () => this._showScreen('settings');
-    q('#nav-squad').onclick = () => this.cb.onCustomOpen?.();
+    q('#nav-squad').onclick = () => {this._customView='live';this.cb.onCustomOpen?.();};
     const social = q('#social-panel');
     q('#social-content').append(q('#screen-squad'));
     q('#screen-squad').classList.remove('hidden', 'shell-screen');
@@ -128,7 +163,7 @@ export class UI {
     social.addEventListener('keydown', e => e.stopPropagation());
     q('#nav-armory').onclick = () => this.showCharacterSheet('character');
     q('#nav-account').onclick = () => q('#account-card')?.classList.toggle('hidden');
-    q('#nav-home').onclick = () => this.cb.onEnterWorld?.();
+    q('#nav-home').onclick = () => this._playFromTitle();
     q('#leader-custom').onclick = () => this.cb.onCustomOpen?.();
     q('#leader-back').onclick = () => this._showScreen('account');
     q('#tab-campaign').onclick = () => this.cb.onCampaignMap && this.cb.onCampaignMap();
@@ -204,6 +239,7 @@ export class UI {
       this._selectedCustomGame = null;
       this._selectedArcadeMap = null;
       this._renderCustomRows();
+      if(this._customView==='live')this.cb.onCustomRefresh?.();
     };
     for (const filter of this.root.querySelectorAll('.custom-filter')) filter.onclick = () => {
       this._customFilter = filter.dataset.filter;
@@ -569,7 +605,7 @@ export class UI {
     if (!seg.dataset.init) {
       seg.dataset.init = '1';
       seg.innerHTML = [
-        ['campaign', '⚔️ Campaign'], ['survival', '💀 Survival'], ['labyrinth', '🌀 Labyrinth'],
+        ['campaign', '⚔️ Iron Rain'], ['survival', '💀 Survival'], ['labyrinth', '🌀 Labyrinth'],
       ].map(([key, label]) => `<button class="tbtn modechip" data-mode="${key}">${label}</button>`).join('');
       for (const chip of seg.querySelectorAll('.modechip')) {
         chip.onclick = () => this.cb.onModePick && this.cb.onModePick(chip.dataset.mode);
@@ -668,6 +704,7 @@ export class UI {
   }
 
   _paintScreen(name) {
+    this.cb.onWorldVisibility?.(name === 'overworld');
     for (const id of ['account', 'main', 'home', 'overworld', 'character-create', 'character-sheet', 'custom', 'quick', 'setup', 'help', 'pause', 'settings', 'credits', 'daily', 'share', 'results']) {
       const el = this.root.querySelector('#screen-' + id);
       if (el) el.classList.toggle('hidden', id !== name);
@@ -716,7 +753,7 @@ export class UI {
     const alloy = this.root.querySelector('#sys-alloy');
     if (alloy) alloy.textContent = String(loadMeta().currency ?? 0);
     const party = this.root.querySelector('#sys-party');
-    if (party) party.textContent = 'Solo / co-op';
+    if (party) party.textContent = 'Party';
   }
 
   _askConfirm({ title, copy, confirm, danger = false, run }) {
@@ -733,8 +770,8 @@ export class UI {
 
   _playFromTitle() {
     this.cb.onLeaderEntry?.();
-    if (this._profile?.mmoCharacters?.length) { this._showScreen('main'); return; }
-    this.showCharacterCreator();
+    this._customView='arcade';
+    this.cb.onCustomOpen?.();
   }
 
   _wireMenuLists() {
@@ -812,7 +849,7 @@ export class UI {
     this._customHost = hostName;
     this._customGames = games;
     this._customOffline = offline;
-    this._customView = this._customView || 'live';
+    this._customView = this._customView || 'arcade';
     this._customFilter = this._customFilter || 'all';
     this._arcadeFilter = this._arcadeFilter || 'all';
     const character = this._sheetCharacter();
@@ -825,10 +862,10 @@ export class UI {
 
   _arcadeMaps() {
     return [
-      ...LEVELS.map((level) => ({
+      ...[...LEVELS].sort((a,b)=>[1,3,2,4,5].indexOf(a.id)-[1,3,2,4,5].indexOf(b.id)).map((level) => ({
         id: `campaign-${level.id}`, level: level.id, mode: 'campaign', name: level.name,
         icon: '⚔️', author: 'Zillions', players: '1–4', difficulty: 'Normal',
-        description: level.blurb || level.desc || 'Take the planet in a continuous siege.',
+        description: ({1:'Build a frontier fortress, hold the forest approaches, then lead your army against three hives.',3:'Defend an exposed industrial outpost. Shift your hero and reserves between separated enemy approaches.',2:'Fortify a river bend, then choose between safe nearby income and richer deposits farther from your defenses.'})[level.id] || level.blurb || level.desc || 'Build, defend, and lead the counterattack.',
       })),
       ...LABYRINTH_LEVELS.map((level) => ({
         id: `labyrinth-${level.id}`, level: level.id, mode: 'labyrinth', name: level.name,
@@ -864,18 +901,20 @@ export class UI {
         if (this._arcadeFilter === 'recent') return (this._arcadeRecent || []).includes(map.id);
         return true;
       });
+      // Actions must refer to a visible selection, never a filtered-out map.
+      this._selectedArcadeMap = maps.find(map => map.id === this._selectedArcadeMap?.id) || null;
       note.textContent = maps.length ? `${maps.length} prebuilt maps · select one to play or host` : 'No maps match these filters.';
       note.classList.remove('offline');
       for (const map of maps) {
         const row = document.createElement('button');
         row.className = `custom-map-row${this._selectedArcadeMap?.id === map.id ? ' selected' : ''}`;
-        row.innerHTML = `<span class="custom-map-icon">${map.icon}</span><span><b>${escapeHtml(map.name)}</b><small>${map.mode === 'campaign' ? 'SIEGE' : map.mode.toUpperCase()} · BY ${map.author.toUpperCase()}</small></span><span>${map.players}</span><span>PREBUILT</span>`;
+        row.innerHTML = `<span class="custom-map-icon">${map.icon}</span><span><b>${escapeHtml(map.name)}</b><small>${map.mode === 'campaign' ? 'IRON RAIN' : map.mode.toUpperCase()} · BY ${map.author.toUpperCase()}</small></span><span>${map.players}</span><span>PREBUILT</span>`;
         row.onclick = () => { this._selectedArcadeMap = map; this._selectedCustomGame = null; this._renderCustomRows(); };
         box.appendChild(row);
       }
       const map = this._selectedArcadeMap;
       detail.innerHTML = map
-        ? `<span class="modeeyebrow">ARCADE MAP</span><div class="custom-map-preview">${map.icon}</div><h2>${escapeHtml(map.name)}</h2><p>${escapeHtml(map.description)}</p><dl><div><dt>MODE</dt><dd>${map.mode === 'campaign' ? 'SIEGE' : map.mode.toUpperCase()}</dd></div><div><dt>PLAYERS</dt><dd>${map.players}</dd></div><div><dt>DIFFICULTY</dt><dd>${map.difficulty}</dd></div><div><dt>AUTHOR</dt><dd>${map.author}</dd></div></dl>`
+        ? `<span class="modeeyebrow">ARCADE MAP</span><div class="custom-map-preview">${map.icon}</div><h2>${escapeHtml(map.name)}</h2><p>${escapeHtml(map.description)}</p><dl><div><dt>MODE</dt><dd>${map.mode === 'campaign' ? 'IRON RAIN' : map.mode.toUpperCase()}</dd></div><div><dt>PLAYERS</dt><dd>${map.players}</dd></div><div><dt>DIFFICULTY</dt><dd>${map.difficulty}</dd></div><div><dt>AUTHOR</dt><dd>${map.author}</dd></div></dl>`
         : '<span class="modeeyebrow">ARCADE</span><h2>CHOOSE A MAP</h2><p>Browse Zillions maps, then play immediately or host a lobby.</p>';
       if (map) this._customMapPreview(map.level);
       join.textContent = 'PLAY NOW';
@@ -892,6 +931,8 @@ export class UI {
       if (status === 'playing' && game.status === 'open') return false;
       return !query || `${game.name} ${game.host_name} ${game.mapName || ''} ${game.mode || ''}`.toLowerCase().includes(query);
     });
+    // Refresh/filter changes can remove or update a selected room.
+    this._selectedCustomGame = games.find(game => game.id === this._selectedCustomGame?.id) || null;
     note.textContent = this._customOffline
       ? '📡 Offline — Live Games needs the lobby server.'
       : games.length ? `${games.length} live games found` : 'No joinable games. Host one or browse Arcade.';
@@ -902,7 +943,7 @@ export class UI {
       row.className = `custom-live-row${this._selectedCustomGame?.id === game.id ? ' selected' : ''}`;
       row.disabled = incompatible;
       const setup = publicRoomSetup(game);
-      row.innerHTML = `<span><b>${escapeHtml(game.name || `${game.host_name}'s game`)}</b><small>HOST @${escapeHtml(game.host_name || 'unknown')}</small></span><span>${escapeHtml(setup.mapName || levelById(setup.level)?.name || 'Unknown map')}<small>${String(setup.mode || 'campaign').toUpperCase()} · ${(DIFFICULTY[setup.difficulty] || DIFFICULTY.normal).label}</small></span><span>${game.players || 1}/${game.max_players || 4}</span><span class="custom-status ${game.status === 'open' ? 'open' : 'playing'}">${incompatible ? 'UPDATE' : game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</span>`;
+      row.innerHTML = `<span><b>${escapeHtml(game.name || `${game.host_name}'s game`)}</b><small>HOST @${escapeHtml(game.host_name || 'unknown')}</small></span><span>${escapeHtml(setup.mapName || levelById(setup.level)?.name || 'Unknown map')}<small>${(setup.mode || 'campaign') === 'campaign' ? 'IRON RAIN' : String(setup.mode).toUpperCase()} · ${(DIFFICULTY[setup.difficulty] || DIFFICULTY.normal).label}</small></span><span>${game.players || 1}/${game.max_players || 4}</span><span class="custom-status ${game.status === 'open' ? 'open' : 'playing'}">${incompatible ? 'UPDATE' : game.status === 'open' ? 'JOINABLE' : 'IN PROGRESS'}</span>`;
       row.onclick = () => { this._selectedCustomGame = game; this._selectedArcadeMap = null; this._renderCustomRows(); };
       box.appendChild(row);
     }
@@ -969,7 +1010,7 @@ export class UI {
       button.type = 'button';
       button.className = `creator-class${key === this._creatorClass ? ' sel' : ''}`;
       button.dataset.key = key;
-      button.innerHTML = `<i>${klass.icon}</i><span><b>${klass.name}</b><small>${klass.role}</small></span>${klass.ready ? '<em>COMPLETE</em>' : '<em>PROTOTYPE</em>'}`;
+      button.innerHTML = `<i>${klass.icon}</i><span><b>${klass.name}</b><small>${klass.role}</small></span>`;
       button.onclick = () => {
         this._creatorClass = key;
         for (const entry of classes.children) entry.classList.toggle('sel', entry === button);
@@ -1072,7 +1113,7 @@ export class UI {
     for(const b of q('#creator-races').children)b.classList.toggle('sel',b.textContent.includes('Human'));
     for(const swatch of this.root.querySelectorAll('.creator-swatch'))swatch.classList.toggle('sel',swatch.dataset.key===this._creatorAppearance);
     for(const key of ['name','culture','color','emblem']){const el=q('#creator-faction-'+key);el.value=identity[key]||'';el.disabled=!!identity.name;}
-    q('#creator-faction-note').textContent=identity.name ? 'This roster shares its existing campaign banner. Political membership and rank are not assigned by character creation.' : 'An optional expedition banner identifies your campaign. It does not found a political faction. You can join or build affiliations when those systems arrive.';
+    q('#creator-faction-note').textContent=identity.name ? 'Your characters share this expedition banner.' : 'Choose a banner for your expedition. Your commander remains independent.';
     this._renderCreatorSummary();
     this._creatorStepTo(0);
     this._showScreen('character-create');
@@ -1089,7 +1130,7 @@ export class UI {
     q('#creator-submit').classList.toggle('hidden',this._creatorStep!==5);
     q('#creator-name').required=this._creatorStep===5;
     const banner=q('#creator-banner-preview'); banner.textContent=CHAPTER_EMBLEMS[q('#creator-faction-emblem').value]||'✦';banner.style.background=CHAPTER_COLORS[q('#creator-faction-color').value]||CHAPTER_COLORS.cobalt;
-    q('#creator-review').textContent=`${MMO_RACES[this._creatorRace]?.name || 'Human'} Vanguard · ${q('#creator-faction-name').value || 'Independent expedition'}. Begin in the Earth campaign. Your character and equipment persist between missions.`;
+    q('#creator-review').textContent=`${MMO_RACES[this._creatorRace]?.name || 'Human'} Vanguard · ${q('#creator-faction-name').value || 'Independent expedition'}. Begin in the frontier. Your character and equipment persist between missions.`;
   }
 
   _renderChapter() {
@@ -1153,9 +1194,9 @@ export class UI {
       b.onclick=()=>this.cb.onCharacterSelect?.(c.id);list.appendChild(b);
     }
     if (!characters.length) { const empty=document.createElement('p');empty.textContent='Your story starts with a leader.';list.appendChild(empty); }
-    this.root.querySelector('#nav-home').disabled=!characters.length;
+    this.root.querySelector('#nav-home').disabled=false;
     list.classList.remove('empty');
-    this.root.querySelector('#m-enter-world').disabled=!characters.length;
+    this.root.querySelector('#m-enter-world').disabled=true;
     const create=this.root.querySelector('#m-create-character');
     create.disabled=characters.length>=CHAPTER_ROSTER_LIMIT;
     create.textContent=create.disabled?'Roster full':'+ Create Character';
@@ -1376,12 +1417,11 @@ export class UI {
     this.root.querySelector('#sheet-sub').textContent =
       `${character.chapterLeader ? CHAPTER_LEADERS.find(l=>l.key===character.chapterLeader)?.role : klass.name} · ${budget - spent} of ${budget} skill points unspent`;
 
-    const forge = this._sheetTab === 'shop' || this._sheetTab === 'crafting';
     for (const button of this.root.querySelectorAll('.sheet-tab')) {
-      button.classList.toggle('sel', button.dataset.tab === this._sheetTab || (forge && button.dataset.tab === 'shop' && this._sheetTab === 'crafting'));
+      button.classList.toggle('sel', button.dataset.tab === this._sheetTab);
     }
     for (const tab of ['character', 'gear', 'shop', 'crafting', 'abilities', 'lattice']) {
-      const open = this._sheetTab === tab || (forge && (tab === 'shop' || tab === 'crafting'));
+      const open = this._sheetTab === tab;
       this.root.querySelector(`#sheet-panel-${tab}`).classList.toggle('hidden', !open);
     }
 
@@ -1454,7 +1494,7 @@ export class UI {
     const vendorNav = this.root.querySelector('#market-vendors');
     vendorNav.innerHTML = Object.values(VENDORS).map((vendor) => {
       const eligibility = vendorEligibility(vendor.id, character);
-      return `<button data-vendor="${vendor.id}" class="${vendor.id === this._marketVendor ? 'sel' : ''}" ${eligibility.ok ? '' : 'disabled'}>${vendor.icon} ${vendor.name}${eligibility.ok ? '' : ` · LV ${eligibility.requiredLevel}`}</button>`;
+      return `<button data-vendor="${vendor.id}" class="${vendor.id === this._marketVendor ? 'sel' : ''}" ${eligibility.ok ? '' : 'disabled'}>${icon('trade')} ${vendor.name}${eligibility.ok ? '' : ` · LV ${eligibility.requiredLevel}`}</button>`;
     }).join('');
     for (const button of vendorNav.querySelectorAll('[data-vendor]')) button.onclick = () => {
       this._marketVendor = button.dataset.vendor;
@@ -1469,7 +1509,7 @@ export class UI {
     stockRoot.innerHTML = stock.map((offer, index) => {
       const preview = equipmentPreview(character, offer.key);
       const roleMatch = preview.deltas.some((entry) => entry.key === CLASS_ATTRS[character.classKey] && entry.value > 0);
-      return `<article class="market-item" style="--rarity:${offer.item.rarityColor}"><span>${offer.item.icon}</span><div><b>${offer.item.name}${roleMatch ? ' · ROLE MATCH' : ''}</b><small>${offer.item.rarityName} · Item ${offer.item.ilvl} · ${compactDeltas(preview.deltas)}${preview.target ? ` · ${preview.target}` : ''}</small></div><button data-buy="${index}" ${offer.price > marketCurrency ? 'disabled' : ''}>${META_CURRENCY.icon} ${offer.price}</button></article>`;
+      return `<article class="market-item" style="--rarity:${offer.item.rarityColor}"><span>${icon(offer.item.slot === 'weapon' ? 'assault' : 'armory')}</span><div><b>${offer.item.name}${roleMatch ? ' · ROLE MATCH' : ''}</b><small>${offer.item.rarityName} · Item ${offer.item.ilvl} · ${compactDeltas(preview.deltas)}${preview.target ? ` · ${preview.target}` : ''}</small></div><button data-buy="${index}" ${offer.price > marketCurrency ? 'disabled' : ''}>${META_CURRENCY.icon} ${offer.price}</button></article>`;
     }).join('');
     for (const button of stockRoot.querySelectorAll('[data-buy]')) {
       button.onclick = async () => {
@@ -1499,7 +1539,7 @@ export class UI {
     const sellRoot = this.root.querySelector('#market-sell');
     sellRoot.innerHTML = (character.items || []).map((key, index) => {
       const item = itemInfo(key);
-      return item ? `<article class="market-item compact" style="--rarity:${item.rarityColor}"><span>${item.icon}</span><div><b>${item.name}</b><small>${item.rarityName}</small></div><button data-sell="${index}">SELL · ${META_CURRENCY.icon} ${vendorSellPrice(key)}</button></article>` : '';
+      return item ? `<article class="market-item compact" style="--rarity:${item.rarityColor}"><span>${icon(item.slot === 'weapon' ? 'assault' : 'armory')}</span><div><b>${item.name}</b><small>${item.rarityName}</small></div><button data-sell="${index}">SELL · ${META_CURRENCY.icon} ${vendorSellPrice(key)}</button></article>` : '';
     }).join('') || '<span class="empty-gear">Your stash has nothing the quartermaster can buy.</span>';
     for (const button of sellRoot.querySelectorAll('[data-sell]')) {
       button.onclick = async () => {
@@ -2190,7 +2230,11 @@ export class UI {
   }
 
   hideMatchChrome() {
-    for (const id of ['topbar', 'actionbar', 'minimap-wrap', 'bossbar', 'combat-alert']) {
+    this.hideCoach();
+    this.hideMissionIntro();
+    this.setDeploymentLoading(false);
+    this._hideTip();
+    for (const id of ['topbar', 'actionbar', 'minimap-wrap', 'bossbar', 'combat-alert', 'wave-approach', 'builder-controls', 'battle-details', 'gamechat', 'combat-locations']) {
       this.root.querySelector('#' + id)?.classList.add('hidden');
     }
     this.pauseOpen = false;
@@ -2306,7 +2350,7 @@ export class UI {
   }
 
   _syncChapterHeroChoice(mode) {
-    const character = mode === 'campaign' ? this._sheetCharacter() : null;
+    const character = mode === 'campaign' && !this._customBattle ? this._sheetCharacter() : null;
     const previous = this.selectedHero;
     if (character) {
       this.selectedHero = character.proxyHero;
@@ -2341,23 +2385,25 @@ export class UI {
     this._showScreen('setup');
     const setupScreen = this.root.querySelector('#screen-setup');
     setupScreen.classList.toggle('roommode', !!online);
+    setupScreen.classList.toggle('campaign-encounter', this._campaignEncounter);
     setupScreen.classList.toggle('custom-room', !!online && this._customBattle);
+    setupScreen.classList.toggle('custom-map-setup', custom && !online && !coop && !share);
     setupScreen.classList.toggle('sharemode', !!share);
     setupScreen.classList.remove('room-host', 'room-guest');
     this._loadHeroPortraits();
     const title = online
       ? `🌐 ${online.visibility === 'private' ? 'Private' : 'Public'} game — code ${online.join_code}`
-      : coop ? 'Co-op — one city, one hero each'
+      : coop ? 'Party battle — one hero each'
       : mode === 'survival' ? '💀 Survival — how high can you drive the Threat?'
       : mode === 'labyrinth' ? '🌀 The Labyrinth — no colony, no army, no way but through'
-      : this._campaignEncounter ? `${levelById(Number(level))?.name || 'Campaign'} — Prepare for battle` : 'Custom battle setup';
+      : this._campaignEncounter || custom ? `${levelById(Number(level))?.name || 'Battle'} — ${mode === 'campaign' ? 'Iron Rain' : 'Prepare for battle'}` : 'Custom battle setup';
     this.root.querySelector('#s-title').textContent = title;
     const fieldLabel = setupScreen.querySelector('.field-label');
     const heroLabel = setupScreen.querySelector('.hero-label');
     const diffLabel = setupScreen.querySelector('.diff-label');
     if (fieldLabel) fieldLabel.innerHTML = online ? 'MAP &amp; MISSION <span id="warstatus" class="warstatus"></span>' : 'Battlefield <span id="warstatus" class="warstatus"></span>';
     if (heroLabel) heroLabel.innerHTML = online ? 'YOUR HERO <small>Choose the character kit you bring into this room.</small>' : 'Your hero <small>— right-click to move or attack-move. Abilities are <span data-bind-label="ability1"></span> <span data-bind-label="ability2"></span> <span data-bind-label="ability3"></span> <span data-bind-label="ability4"></span>.</small>';
-    if (heroLabel && mode === 'campaign' && this._sheetCharacter()) heroLabel.innerHTML = 'EXPEDITION LEADER <small>Selected in your chapter. Go back to change leader or equipment.</small>';
+    if (heroLabel && mode === 'campaign' && !this._customBattle && this._sheetCharacter()) heroLabel.innerHTML = 'EXPEDITION LEADER <small>Selected in your chapter. Go back to change leader or equipment.</small>';
     if (diffLabel) diffLabel.textContent = online ? 'ROOM DIFFICULTY' : 'Difficulty';
     // Multiplayer setups choose the war mode here; solo modes chose it on the
     // Play Solo card, so the chips would be a second, contradictory entrance.
@@ -2385,7 +2431,7 @@ export class UI {
       mp.dataset.init = '1';
       mp.innerHTML = `
         <div class="room-commandbar"><span><b>STAGING LOBBY</b><small>Choose your hero. Invite friends, then ready up.</small></span><strong>${online.visibility === 'private' ? 'PRIVATE' : 'PUBLIC'} · ${online.join_code}</strong></div>
-        <div class="team-row"><section><h3>Team A</h3><small>Co-op shares one side.</small></section><section class="soon"><h3>Team B</h3><small>Coming soon</small><button type="button" class="soon" disabled>Swap sides</button><button type="button" class="soon" disabled>AI players · Coming soon</button></section></div>
+        <div class="team-row"><section><h3>Team A</h3><small>Players share one side.</small></section><section class="soon"><h3>Team B</h3><small>Coming soon</small><button type="button" class="soon" disabled>Swap sides</button><button type="button" class="soon" disabled>AI players · Coming soon</button></section></div>
         <div class="mprow"><span class="mpstatus ok" id="online-status">🟢 Live — waiting for players. Share code <b>${online.join_code}</b>.</span></div>
         <div id="room-roster" class="roomroster"></div>
         <button class="diffbtn roomready hidden" id="room-ready">READY FOR BATTLE</button>
@@ -2502,7 +2548,7 @@ export class UI {
   _queueLevelThumb(lv, canvas, locked) {
     this._thumbCache = this._thumbCache || new Map();
     const cached = this._thumbCache.get(lv.id);
-    if (cached) { canvas.getContext('2d').drawImage(cached, 0, 0); if (locked) this._dimThumb(canvas); return; }
+    if (cached) { canvas.getContext('2d').drawImage(cached, 0, 0, canvas.width, canvas.height); if (locked) this._dimThumb(canvas); return; }
     this._thumbQueue = this._thumbQueue || [];
     this._thumbQueue.push({ lv, canvas, locked });
     if (this._thumbTimer) return;
@@ -2582,6 +2628,7 @@ export class UI {
     this._stance = null;
     this._nearestContact = null;
     this._upgradesOpen = false;
+    this._itemsKey = null; this._packKey = null;
     this._upgradePanelKey = null;
     this._combatAlertKey = null;
     this.root.querySelector('#topbar').classList.remove('hidden');
@@ -2603,10 +2650,11 @@ export class UI {
         ...(d.passives || []).map((passive, index) => ({
           kind: `PASSIVE ${index + 1}`, icon: passive.icon, name: passive.name, desc: passive.desc,
         })),
-        ...heroAbilities(d).filter(Boolean).map((ab,slot)=>({kind:ab.passive?'PASSIVE':abilityKeyLabel(this._binds||loadBinds(),slot),icon:ab.icon,name:ab.name,desc:ab.desc,active:!ab.passive})),
+        ...heroAbilities(d).filter(ability => ability && !ability.passive).map(ability => ({kind:'ACTIVE',name:ability.name,desc:ability.desc,active:true})),
       ].filter(Boolean);
-      kit.innerHTML = entries.map((entry) => `<div class="fight-ability${entry.active ? ' active' : ''}" title="${escapeHtml(entry.desc || '')}">
-        <span>${entry.icon}</span><b>${escapeHtml(entry.name)}</b><small>${entry.kind}</small>
+      // Active skills live in the command slots, not duplicated in the status strip.
+      kit.innerHTML = entries.filter(entry => !entry.active).map((entry) => `<div class="fight-ability${entry.active ? ' active' : ''}" title="${escapeHtml(entry.desc || '')}">
+        <span>${hudGlyph(entry.kind==='AURA'?'wave':'armor')}</span><b>${escapeHtml(entry.name)}</b><small>${entry.kind}</small>
       </div>`).join('');
     }
     const face = this.root.querySelector('#a-face');
@@ -2643,7 +2691,7 @@ export class UI {
     const label = chip.querySelector('span');
     if (label) label.textContent = fighting ? 'Fight mode' : 'Build mode';
     this.root.querySelector('#fight-kit')?.classList.toggle('hidden', !fighting || !!this._game?.heroes[this._p]?.def.abilities);
-    this.root.querySelector('#herostats')?.classList.toggle('hidden', fighting);
+    this.root.querySelector('#herostats')?.classList.remove('hidden');
     chip.title = fighting
       ? `${this._keyLabel('build_mode')} switches to Build mode. ${this._keyLabel('dodge')} dodges; ${this._keyLabel('ability1')} uses the special.`
       : `${this._keyLabel('build_mode')} switches to Fight mode. Hold ${this._keyLabel('dodge')} or ${this._keyLabel('build')} to build.`;
@@ -2688,8 +2736,9 @@ export class UI {
     builder.classList.toggle('hidden',!b||game.mode==='labyrinth'||game.over||!!this._battlePanel);
     if(b){
       this._builderPaused=b.paused;
+      for (const button of this.root.querySelectorAll('[data-worker]')) {button.disabled=p!==0;button.classList.toggle('sel',!b.paused&&button.dataset.worker===b.order);}
       this.root.querySelector('#builder-toggle').textContent='Builders · '+BUILDER_ORDERS[b.order];
-      this.root.querySelector('#builder-status').textContent=b.paused?'Crew idle':builderStatus(game);
+      this.root.querySelector('#builder-status').textContent=b.paused?'Paused · choose an order to start':builderStatus(game);
       const order=this.root.querySelector('#builder-order'),reserve=this.root.querySelector('#builder-reserve'),pause=this.root.querySelector('#builder-pause');
       if(document.activeElement!==order)order.value=b.order;
       if(document.activeElement!==reserve)reserve.value=b.reserve;
@@ -2701,8 +2750,8 @@ export class UI {
     const q = (id) => this.root.querySelector(id);
     const controlMode = controls.controlMode || 'build';
     this.setControlMode(controlMode);
-    q('#r-gold').innerHTML = `🪙 <b>${Math.floor(game.gold)}</b><small class="income-rate">+${((game.incomeRate || 0) * 60).toFixed(1)}/min</small>`;
-    q('#r-gold').title = 'Gold · automatic income every 4 seconds. Fractional gold carries forward. Building and repair spending reduces the balance.';
+    q('#r-gold').innerHTML = `Gold <b>${Math.floor(game.gold)}</b><small class="income-rate">+${((game.incomeRate || 0) * 60).toFixed(1)}/min</small>`;
+    q('#r-gold').title = 'Gold · income from surviving buildings. Captured ground needs a Forward Camp in Iron Rain. Building and repair spending reduces the balance.';
 
     // Threat: the clock that replaced nightfall. The bar inside the chip fills
     // toward the next surge, so "something is coming" is always legible.
@@ -2712,13 +2761,15 @@ export class UI {
     const frac = Math.max(0, Math.min(1, (game.threat || 0) % 1));
     q('#r-day').innerHTML = game.phase === 'found'
       ? '🏳️ <b>Claim your ground</b>'
+      : game.ironRain?.prep > 0
+        ? `<b>Prepare ${Math.ceil(game.ironRain.prep)}s</b>`
       : game.finalStand
-        ? labyrinth ? '👑 <b>The champion walks</b>' : '☠️ <b>Final counterattack</b>'
+        ? labyrinth ? '👑 <b>The champion walks</b>' : game.ironRain ? '<b>Defeat the commander</b>' : '☠️ <b>Final counterattack</b>'
         : labyrinth
           ? `${['🕯️ <b>Quiet</b>', '👣 <b>Something follows</b>', '☠️ <b>The pursuit</b>', '🚨 <b>The flood</b>'][game.pursuitStage || 0]}<i class="threatbar" style="--f:${Math.min(100, ((game.pursuitTime || 0) / 360) * 100).toFixed(0)}%"></i>`
           : game.mode === 'daily'
             ? `⚔️ <b>Wave ${game.dailyCleared || 0}/${game.daily?.waves?.length || 0}</b>`
-            : `☠️ <b>Threat ${game.threatLevel}</b><i class="threatbar" style="--f:${(frac * 100).toFixed(0)}%"></i>`;
+            : `<b>Threat ${game.threatLevel}</b><i class="threatbar" style="--f:${(frac * 100).toFixed(0)}%"></i>`;
     q('#r-day').classList.toggle('danger', !!game.finalStand || frac > 0.85);
     // In the labyrinth the front is chambers and lives, not nodes and camps.
     if (labyrinth) {
@@ -2728,7 +2779,7 @@ export class UI {
       q('#r-front').classList.toggle('danger', game.lives === 0);
     } else {
       const total = game.activeNodes ? game.activeNodes().length : game.nodes.length;
-      q('#r-front').innerHTML = `🚩 <b>${held}</b>/${total} · 🔥 <b>${nests}</b>`;
+      q('#r-front').innerHTML = `Nodes <b>${held}</b>/${total} · Hives <b>${nests}</b>`;
       q('#r-front').classList.toggle('danger', held === 0 && game.phase !== 'found');
     }
 
@@ -2745,6 +2796,7 @@ export class UI {
       }
     }
     if (labyrinth) {
+      q('#army-status').title = '';
       const active = game.labyrinthEncounters?.find((e) => e.status === 'active');
       const def = active && game.map.labyrinthLayout?.encounters?.find((e) => e.key === active.key);
       const room = def && game.map.labyrinthLayout?.rooms?.[def.room];
@@ -2761,14 +2813,32 @@ export class UI {
         defend: 'holding the city line',
         guard: 'escorting heroes · Keep not garrisoned',
         attack: 'pushing the lanes',
+        rally: 'holding rally point',
       }[game.stance] || 'awaiting orders';
-      q('#army-status').innerHTML = firstSiege
-        ? `<b>${firstSiege.title}</b> · ${firstSiege.detail}`
-        : army
-        ? `<b>${army}</b> troops in <b>${squads || army}</b> formations · ${stanceText} · camps keep mustering`
+      const armyStatus = q('#army-status');
+      const formationDetail = army
+        ? `${army} troops in ${squads || army} formations · ${stanceText} · camps keep mustering`
         : 'Build militia, ranger, or sniper camps — they muster squads forever.';
+      const waveStatus = firstSiege?.title.replace('CHOOSE YOUR OPENING','Choose opening').replace('FIRST SIEGE','Wave').replace('FIRST ATTACK','First wave').replace('REINFORCEMENTS ACTIVE','Reinforcements active').replace(' remain',' left');
+      armyStatus.textContent = waveStatus ? `${army} troops · ${waveStatus}` : army ? `${army} troops · ${squads || army} formations` : 'No troops · Build a camp';
+      armyStatus.title = [firstSiege?.title, firstSiege?.detail, formationDetail].filter(Boolean).join(' ');
     }
-    q('#r-z').textContent = `🧟 ${game.zombies.length}`;
+    if (this._awarenessGame !== game || !this._awareness || game.time < this._awarenessTime || game.time - this._awarenessTime >= .25) {
+      this._awarenessGame = game;
+      this._awarenessTime = game.time;
+      this._awareness = battlefieldAwareness(game);
+    }
+    const awareness = this._awareness;
+    q('#r-z').textContent = `Visible ${awareness.enemies}`;
+    q('#r-army').textContent = `Troops ${awareness.troops}`;
+    q('#r-army').title = Object.entries(awareness.composition).map(([name,count])=>`${name}: ${count}`).join(' · ') || 'Build camps to recruit troops';
+    const battles=q('#combat-locations');
+    battles.classList.toggle('hidden',game.over || !this.overlayHidden() || !awareness.fights.length);
+    const fightKey=awareness.fights.map(f=>`${f.x},${f.z}`).join(';');
+    if(this._fightKey!==fightKey){
+      this._fightKey=fightKey;battles.replaceChildren();
+      awareness.fights.forEach((f,i)=>{const button=document.createElement('button');button.type='button';button.textContent=`⚔ Battle ${i+1}`;button.title='Look at this fight';button.onclick=()=>this.cb.onLook?.(f.x,f.z);battles.append(button);});
+    }
     if (game.time - (this._contactTime ?? -1) >= .5) {
       this._contactTime = game.time;
       const sources = fogVisionSources(game), hero = game.heroes[p];
@@ -2815,6 +2885,10 @@ export class UI {
       q('#a-lvl').title = this._hudCharacter ? `Leader level ${this._hudCharacter.level} is permanent. Match upgrades apply during this siege.` : 'Level during this siege';
       q('#a-lvl').textContent = h.dead ? `☠️ ${Math.ceil(h.reviveT)}s` : `Match Lv ${h.level}`;
       q('#a-hp').style.width = `${Math.max(0, (h.hp / h.maxHp) * 100)}%`;
+      q('#hud-hp-text').textContent = `${Math.max(0,Math.ceil(h.hp))} / ${Math.ceil(h.maxHp)} HP`;
+      q('#hud-resource-fill').parentElement.hidden = !h.def.mana;
+      q('#hud-resource-text').textContent = h.def.mana ? `${Math.floor(h.spells?.mana ?? h.def.mana)} ${h.def.resource || 'MP'}` : '';
+      q('#hud-resource-fill').style.width = h.def.mana ? `${Math.max(0,Math.min(100,(h.spells?.mana ?? h.def.mana)/h.def.mana*100))}%` : '0%';
       q('#a-hp').parentElement.classList.toggle('critical', !h.dead && h.hp / h.maxHp <= 0.25);
       const need = xpForLevel(h.level);
       q('#a-xp').style.width = h.level >= HERO_MAX_LEVEL ? '100%' : `${(h.xp / need) * 100}%`;
@@ -2823,9 +2897,9 @@ export class UI {
       const itemsKey = (h.items || []).join(',');
       if (this._itemsKey !== itemsKey) {
         this._itemsKey = itemsKey;
-        q('#a-items').innerHTML = (h.items || [])
-          .slice(0, 4).map((k) => { const it = itemInfo(k); return it ? `<span class="hitem" title="${it.name} — ${it.desc || itemLines(it).join(', ')}">${it.icon}</span>` : ''; })
-          .join('') + ((h.items || []).length > 4 ? `<button class="hitem" aria-label="View all automatic bonuses">+${h.items.length - 4}</button>` : '');
+        q('#a-items').innerHTML = Array.from({length:4},(_,i)=>{const k=(h.items||[])[i],it=k&&itemInfo(k);return `<button type="button" class="hitem hud-item${it?'':' empty'}" aria-label="${escapeHtml(it?it.name:'Empty equipment slot')}" title="${escapeHtml(it?`${it.name} — ${it.desc||itemLines(it).join(', ')}`:'Empty equipment slot')}">${it?itemGlyph(it):hudGlyph('empty')}</button>`;}).join('');
+        if((h.items||[]).length>4)q('#a-items').lastElementChild.insertAdjacentHTML('beforeend',`<small>+${h.items.length-4}</small>`);
+        q('#a-items').onclick=()=>{this._battlePanel={mode:'items'};};
       }
 
       // Pack: what this hero has picked up off the field, and how much room is
@@ -2833,8 +2907,7 @@ export class UI {
       const packKey = (h.pack || []).join(',');
       if (this._packKey !== packKey) {
         this._packKey = packKey;
-        const full = (h.pack || []).length >= PACK_SLOTS;
-        q('#a-pack').innerHTML = `<button class="pack-open${full ? ' full' : ''}" aria-label="View carried items">Items · Pack ${(h.pack || []).length}/${PACK_SLOTS}${full ? ' FULL' : ''}</button>`;
+        q('#a-pack').innerHTML = Array.from({length:PACK_SLOTS},(_,i)=>{const k=(h.pack||[])[i],it=k&&itemInfo(k);return `<button type="button" class="pack-open hud-item${it?'':' empty'}" aria-label="${escapeHtml(it?`View ${it.name}`:`Empty field pack slot ${i+1}`)}" title="${escapeHtml(it?`${it.name} — ${it.desc||itemLines(it).join(', ')}`:'Empty field pack slot · Pick up field loot')}">${it?itemGlyph(it):hudGlyph('empty')}</button>`;}).join('');
       }
 
       const stats = game.heroStats ? game.heroStats(h) : null;
@@ -2860,7 +2933,7 @@ export class UI {
         const empty=charge?.count===0;
         const noMana=(h.spells?.mana ?? h.def.mana ?? 0)<spellManaCost(h,slot);
         const label = abilityKeyLabel(this._binds || loadBinds(), slot);
-        return `<button data-ability-slot="${slot}" ${h.dead || cd > 0 || empty || noMana || ability.passive ? 'disabled' : ''} title="${escapeHtml(ability.desc || '')}">${ability.icon || ''} ${escapeHtml(ability.name)}<small>${ability.passive ? 'Passive' : noMana ? 'Low mana' : empty ? Math.ceil(charge.t)+'s' : cd > 0 ? Math.ceil(cd) + 's' : label}</small></button>`;
+        return `<button class="hud-ability" data-ability-slot="${slot}" ${h.dead || cd > 0 || empty || noMana || ability.passive ? 'disabled' : ''} aria-label="${escapeHtml(ability.name)}" title="${escapeHtml(`${ability.name} — ${ability.desc || ''}`)}"><kbd>${label}</kbd>${abilityGlyph(ability)}<span class="hud-ability-name">${escapeHtml(ability.name)}</span><small>${noMana ? 'Low mana' : empty ? Math.ceil(charge.t)+'s' : cd > 0 ? Math.ceil(cd) + 's' : ''}</small></button>`;
       }).join('');
       if (slots.innerHTML !== slotMarkup) slots.innerHTML = slotMarkup;
 
@@ -2883,17 +2956,17 @@ export class UI {
           const verb = act.mode === 'repair' ? 'Repair' : act.mode === 'rebuild' ? 'Rebuild' : plot.tier > 0 ? 'Upgrade' : 'Build';
           const name = act.mode === 'repair' ? PLOT_KINDS[plot.kind].name : (act.def || nt.def).name;
           this._bigMode = 'build';
-          this._paintBig(big, `bigaction build ready${paying ? ' holding' : ''}`, `<span class="bicon">🏗️</span><span class="btext">${paying ? 'Working' : verb} ${name}<small>Click, or hold ${this._keyLabel('dodge')} or ${this._keyLabel('build')} · ${cost}🪙 · ${this._keyLabel('build_mode')} Fight</small></span>`, h.dead);
+          this._paintBig(big, `bigaction build ready${paying ? ' holding' : ''}`, `<span class="bicon">${icon('build')}</span><span class="btext">${paying ? 'Working' : verb} ${name}<small>Click, or hold ${this._keyLabel('dodge')} or ${this._keyLabel('build')} · ${cost}🪙 · ${this._keyLabel('build_mode')} Fight</small></span>`, h.dead);
         } else {
           this._bigMode = 'idle';
-          this._paintBig(big, 'bigaction build', `<span class="bicon">🏗️</span><span class="btext">Build mode<small>Ride to a plot · hold ${this._keyLabel('dodge')} · ${this._keyLabel('build_mode')} Fight</small></span>`, true);
+          this._paintBig(big, 'bigaction build', `<span class="bicon">${icon('build')}</span><span class="btext">Build mode<small>Ride to a plot · hold ${this._keyLabel('dodge')} · ${this._keyLabel('build_mode')} Fight</small></span>`, true);
         }
       } else {
         this._bigMode = 'cast';
         const cd = Math.max(0, h.abilCd);
         const rank = abilityRank(h.level, h.upgrades);
         const ultRank = (h.upgrades?.ult || 0);
-        this._paintBig(big, 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready'), `<span class="bicon">${ab.icon}</span><span class="btext">${ab.name} <small>${h.def.mana ? `${Math.floor(h.spells?.mana ?? h.def.mana)}/${h.def.mana} ${h.def.resource || 'MP'}${ab.charges ? ` · ${h.spells?.charges?.[0]?.count ?? ab.charges}/${ab.charges} charges` : ''}` : `${'●'.repeat(rank)}${'○'.repeat(3 - rank)} · ULT ${ultRank}/3`} · ${this._keyLabel('ability1')} · ${this._keyLabel('build_mode')} construction</small></span>` +
+        this._paintBig(big, 'bigaction cast' + (cd > 0 || h.dead ? ' cooling' : ' ready'), `<kbd>${this._keyLabel('ability1')}</kbd>${abilityGlyph(ab)}<span class="hud-ability-name">${escapeHtml(ab.name)}</span><span class="hud-ability-meta">${ab.charges ? `${h.spells?.charges?.[0]?.count ?? ab.charges}/${ab.charges} charges` : !h.def.mana ? `Rank ${rank} · Ult ${ultRank}` : ''}</span>` +
           (cd > 0 ? `<span class="bcd">${Math.ceil(cd)}</span>` : ''), h.dead || cd > 0 || h.spells?.charges?.[0]?.count===0 || (h.spells?.mana ?? h.def.mana ?? 0)<spellManaCost(h,0));
       }
     }
@@ -3086,6 +3159,9 @@ export class UI {
 
   showBanner(text, cls = '', dur = 3500) {
     const severity = cls === 'bad' ? 'bad' : cls === 'good' ? 'good' : 'info';
+    if (severity === 'info' && this._game && !this._game.over && this.overlayHidden()) {
+      this.nav.toasts = this.nav.toasts.filter(item => item.severity !== 'info');
+    }
     const item = this.nav.toast(String(text ?? ''), { severity, ttl: dur });
     this._paintToasts();
     this._toastTimers = this._toastTimers || new Map();
@@ -3146,7 +3222,8 @@ export class UI {
   }
 
   setSpeedUI(speed, paused) {
-    this.root.querySelector('#b-pause').textContent = paused ? '▶' : '⏸';
+    this.root.querySelector('#b-pause').textContent = paused ? 'Play' : 'Pause';
+    this.root.querySelector('#b-pause').setAttribute('aria-label', paused ? 'Resume battle' : 'Pause battle');
     this.root.querySelector('#b-pause').classList.toggle('active', paused);
     const readout = this.root.querySelector('#speed-readout');
     if (readout) readout.textContent = paused ? 'PAUSED' : `${speed}×`;
@@ -3382,7 +3459,7 @@ export class UI {
     if (status && state.ready) {
       if (needsUsername) status.textContent = state.error || 'Choose a username for this Zillions account.';
       else if (state.signedIn) status.textContent = `Signed in as @${state.username || state.name || 'Commander'}.`;
-      else if (offlineAllowed) status.textContent = 'Static dev build. Play as a guest, or continue offline to test locally.';
+      else if (offlineAllowed) status.textContent = 'Offline play · progress is saved in this browser.';
       else if (!state.enabled) status.textContent = state.error || 'Cloud sign-in is unavailable. You can still play as a guest.';
       else status.textContent = state.error || 'Play as a guest, or sign in to save progress.';
     }
@@ -3480,7 +3557,7 @@ export class UI {
     row.querySelector('#b-continue').onclick = () => this.cb.onContinue();
   }
 
-  setWaiting(on, text = '⏳ Syncing co-op…') {
+  setWaiting(on, text = '⏳ Syncing battle…') {
     const el = this.root.querySelector('#waitind');
     if (!el) return;
     if (text && el.textContent !== text) el.textContent = text;
@@ -3522,7 +3599,7 @@ export class UI {
     mp.dataset.share = 'draft';
     mp.innerHTML = `
       <div class="share-card">
-        <span class="modeeyebrow">DROP-IN CO-OP</span>
+        <span class="modeeyebrow">BATTLE INVITE</span>
         <h3>Set the siege, then invite</h3>
         <p class="mphint" id="share-status">Pick the battlefield and difficulty above. The invite link is created from those choices.</p>
         <div class="share-actions"><button class="diffbtn sel" id="share-create" type="button">Create invite link</button></div>
@@ -3564,7 +3641,7 @@ export class UI {
         : 'Another tab can open it immediately. A friend on another device joins through the live channel.';
     mp.innerHTML = `
       <div class="share-card">
-        <span class="modeeyebrow">DROP-IN CO-OP</span>
+        <span class="modeeyebrow">BATTLE INVITE</span>
         <h3>Invite a friend</h3>
         <p class="mphint" id="share-status"></p>
         <textarea class="share-link" id="share-url" readonly rows="3" aria-label="Invite link"></textarea>
@@ -3598,7 +3675,7 @@ export class UI {
     mp.dataset.share = '1';
     mp.innerHTML = `
       <div class="share-card">
-        <span class="modeeyebrow">DROP-IN CO-OP</span>
+        <span class="modeeyebrow">BATTLE INVITE</span>
         <h3>You are in this siege</h3>
         <p class="mphint" id="share-status"></p>
         <p class="mphint">${rejoining ? 'Rejoining the match…' : 'Pick your hero, then mark Ready. Changing your hero clears Ready. The host starts for everyone.'}</p>
@@ -3816,6 +3893,7 @@ export class UI {
   }
 
   showPause(netMode, help = false, quests = null) {
+    this.root.querySelector('#p-restart')?.classList.toggle('hidden',!!this.cb.isWorldBattle?.());
     this.pauseOpen = true;
     this._showScreen(help ? 'help' : 'pause');
     const note = this.root.querySelector('#p-note');
@@ -3824,12 +3902,14 @@ export class UI {
       return `<div class="questrow ${q.claimed ? 'done' : q.done ? 'done' : ''}">${q.claimed ? '🏅' : q.done ? '✅' : '⬜'} <b>${q.name}</b> — ${q.desc}${it ? ` <span class="qreward">${it.icon} ${it.name}</span>` : ''}</div>`;
     }).join('');
     note.innerHTML = (questHtml ? `<div class="questbox"><div class="steplabel">SIDE QUESTS</div>${questHtml}</div>` : '')
-      + (netMode ? '⚠️ Co-op keeps running while this menu is open.' : '');
+      + (netMode ? '⚠️ The battle keeps running while this menu is open.' : '');
   }
 
   hidePause() {
     this.pauseOpen = false;
     while (this.nav.inMatch && this.nav.current().name !== 'match') this.nav.back();
+    this._paintScreen(this.nav.screen());
+    this._syncChrome();
     this.root.querySelector('#overlay').classList.add('hidden');
   }
 
@@ -3843,7 +3923,7 @@ export class UI {
         <span class="qreward">${it ? `${it.icon} ${it.name}` : ''}</span></div>`;
     }).join('');
     const quests = questRows ? `<div class="questbox"><div class="steplabel">SIDE QUESTS</div>${questRows}</div>` : '';
-    if (extra.pending) return `${quests}<p class="tagline">⏳ Reporting the siege to command — rewards are granted by the server…</p>`;
+    if (extra.pending) return `${quests}<p class="tagline">Saving battle rewards…</p>`;
     if (extra.error) return `${quests}<p class="tagline">⚠️ ${escapeHtml(extra.error)}</p>`;
     const grants = (extra.grants || []).map((k) => itemInfo(k)).filter(Boolean);
     const full = (extra.skipped || []).filter((entry) => entry.reason === 'stash_full').length;
@@ -4011,6 +4091,7 @@ export class UI {
 
   showEnd(won, stats, threat, levelId, mode = 'campaign', best = 0, extra = null, game = null) {
     this._matchOver = true;
+    this.hideMatchChrome();
     this.pauseOpen = false;
     this.root.querySelector('#pause-veil')?.classList.add('hidden');
     this.hideCoach();
@@ -4028,7 +4109,7 @@ export class UI {
       <div class="panel endpanel ${won ? 'win' : 'lose'}">
         <h1>${daily ? (won ? 'THE DAY IS HELD' : 'THE DAY IS LOST')
           : labyrinth ? (won ? '🌀 THE TRIAL IS CLEARED' : '🌀 THE LABYRINTH KEEPS YOU')
-          : survival ? `💀 THREAT ${threat}` : won ? '🏆 PLANET TAKEN' : '💀 THE CITY HAS FALLEN'}</h1>
+          : survival ? `💀 THREAT ${threat}` : won ? 'VICTORY' : 'DEFEAT'}</h1>
         <p class="tagline">${daily
           ? `${dailyLine}. Score <b>${points}</b>.`
           : labyrinth
@@ -4038,10 +4119,16 @@ export class UI {
           : survival
           ? `The dead are endless — but you drove ${lv.name} to Threat ${threat}.${threat >= best ? ' 🏅 A new personal best!' : ` Best: ${best}.`}`
           : won
-          ? `${lv.name} is yours. Every hive is ash and their champion lies at your walls.`
+          ? `${lv.name} is yours. Every hive is ash and their commander is defeated.`
           : `The dead took the Keep at Threat ${threat}.`}</p>
         <div id="end-rewards">${this._endRewardsHtml(extra)}</div>
         <p id="end-unlock" class="tagline hidden"></p>
+        <div class="result-summary" aria-label="Battle outcome">
+          <div><strong>${game ? game.units.filter(u => !u.hero && !u.dead && u.hp > 0).length : '—'}</strong><span>Troops standing</span></div>
+          <div><strong>${stats.troopsLost ?? '—'}</strong><span>Troops lost</span></div>
+          <div><strong>${stats.lost || 0}</strong><span>Structures lost</span></div>
+        </div>
+        <details class="battle-report"><summary>Battle report</summary>
         <div class="howto stats">
           <div>🧟 Slain: <b>${stats.kills}</b></div>
           <div>🪙 Coins collected: <b>${stats.coins}</b></div>
@@ -4055,15 +4142,16 @@ export class UI {
           <div class="reviewcause"><span>${review.cause.icon}</span><div><b>${review.cause.title}</b><small>${review.cause.detail}</small></div></div>
           <div class="reviewaction"><b>NEXT MOVE</b><span>${review.action}</span></div>
         </div>
+        </details>
         ${extra?.customBattle ? '<p class="tagline">Custom battle · No campaign progress or rewards.</p>' : ''}
         ${extra?.seedRun ? '<p class="tagline">Seed run. Rewards are not recorded.</p>' : ''}
         ${daily && !extra?.seedRun ? `<p class="tagline" id="daily-status">${extra?.dailyGuest ? 'Sign in to put this score on today\'s board.' : 'Checking the run…'}</p>` : ''}
         ${daily && extra?.dailyGuest && !extra?.seedRun ? `<div class="endactions"><button class="startbtn primary" id="b-daily-save" type="button">Save your score</button></div>
           <form id="b-daily-email" class="email-login"><label for="daily-email">Or save with email</label><input id="daily-email" type="email" placeholder="you@example.com" required><button class="menubtn" type="submit">Email me a sign-in link</button></form>` : ''}
         <div class="endactions">
-          ${!extra?.customBattle && !won && mode === 'campaign' && this.cb.canRetry?.(game) ? '<button class="startbtn primary" id="b-retry">Retry mission</button>' : ''}
+          ${!extra?.customBattle && !won && mode === 'campaign' && this.cb.canRetry?.(game) ? '<button class="startbtn" id="b-retry">Retry mission</button>' : ''}
           ${Array.isArray(game?.inputLog) ? '<button class="startbtn" id="b-share-replay" type="button">Share replay</button>' : ''}
-          <button class="startbtn" id="b-restart">${extra?.customBattle ? 'Back to Custom Battles' : daily ? 'Back to title' : mode === 'campaign' ? 'Return to missions' : won ? 'Continue' : 'Try again'}</button>
+          <button class="startbtn primary" id="b-restart">${extra?.customBattle ? 'Back to Custom Games' : daily ? 'Back to title' : mode === 'campaign' ? 'Return to world' : won ? 'Continue' : 'Try again'}</button>
         </div>
         <p id="replay-share-note" class="tagline hidden"></p>
       </div>`;
@@ -4324,6 +4412,7 @@ export class UI {
   }
 
   drawMinimap(game, camFocus, viewSize) {
+    this._minimapGame = game;
     const top = this.root.querySelector('#minimap-top');
     const N = game.map.size;
     if (top.width !== N) { top.width = N; top.height = N; }
@@ -4354,6 +4443,7 @@ export class UI {
     }
     ctx.fillStyle = '#43d17c';
     for (const u of game.units) {
+      if (u.dead || u.hp <= 0) continue;
       if (u.hero) { ctx.fillStyle = '#7fd6ff'; ctx.fillRect(u.x - 1.5, u.z - 1.5, 3.5, 3.5); ctx.fillStyle = '#43d17c'; }
       else ctx.fillRect(u.x - 1, u.z - 1, 2, 2);
     }
@@ -4371,6 +4461,14 @@ export class UI {
       ctx.strokeStyle = '#ffd75e';
       ctx.strokeRect(game.boss.x - 3, game.boss.z - 3, 6, 6);
     }
+
+    if (game.builders && game.builders.hp > 0 && !game.builders.recover) {
+      ctx.fillStyle='#ffcb70';ctx.fillRect(game.builders.x-1.2,game.builders.z-1.2,2.4,2.4);
+    }
+    for(const f of this._awareness?.fights || []) {
+      ctx.strokeStyle='#ffb56b';ctx.lineWidth=1.3;ctx.beginPath();ctx.arc(f.x,f.z,3+(performance.now()%900)/300,0,Math.PI*2);ctx.stroke();
+    }
+    if(game.stance==='rally' && game.armyRally){ctx.strokeStyle='#7fd4ff';ctx.lineWidth=1.3;ctx.strokeRect(game.armyRally.x-2,game.armyRally.z-2,4,4);}
 
     const approach = firstWaveApproach(game);
     if (approach) {

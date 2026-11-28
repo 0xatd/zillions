@@ -11,7 +11,7 @@ import { Game } from './game.js';
 import { stateHash } from './lockstep-hash.js';
 import { dailyChallenge, validDay } from './daily.js';
 
-export const SIM_VERSION = 23;
+export const SIM_VERSION = 25;
 export const SHARE_REPLAY_VERSION = 1;
 
 export const SHARE_LIMITS = Object.freeze({
@@ -115,6 +115,7 @@ export function canonicalReplay(replay) {
     won: !!replay.won,
     log: replay.log,
   };
+  if (replay.worldArmy?.length) body.worldArmy = [...replay.worldArmy];
   if (replay.mode === 'daily') body.day = replay.day;
   return body;
 }
@@ -141,6 +142,7 @@ export function validateShareReplay(raw) {
   if (!Number.isInteger(raw.hash)) return fail('invalid_replay', 'hash');
   const leaders = normalizeLeaders(raw.leaders);
   if (!leaders) return fail('invalid_replay', 'leaders');
+  if (raw.worldArmy != null && (!Array.isArray(raw.worldArmy) || raw.worldArmy.length > leaders.length || raw.worldArmy.some(n => !Number.isInteger(n) || n < 0 || n > 40) || (raw.worldArmy.length && raw.mode !== 'campaign'))) return fail('invalid_replay', 'worldArmy');
   let day = null;
   if (raw.mode === 'daily') {
     if (!validDay(raw.day)) return fail('invalid_replay', 'day');
@@ -166,7 +168,7 @@ export function validateShareReplay(raw) {
   }
   const replay = canonicalReplay({
     seed, mode: raw.mode, levelId, difficulty: raw.difficulty, culture: raw.culture,
-    leaders, frames, hash: raw.hash | 0, won: !!raw.won, day, log: cleanLog,
+    leaders, worldArmy: raw.worldArmy, frames, hash: raw.hash | 0, won: !!raw.won, day, log: cleanLog,
   });
   if (shareReplayBytes(replay) > SHARE_LIMITS.maxBytes) return fail('replay_too_large');
   return { ok: true, replay };
@@ -185,6 +187,7 @@ export function buildShareReplay(game, { leaders, difficulty } = {}) {
     difficulty: difficulty || game.diffKey,
     culture: game.culture,
     leaders: normalized,
+    worldArmy: game.worldArmy,
     frames: game.steps,
     hash: stateHash(game),
     won: !!game.won,
@@ -252,6 +255,7 @@ export function createReplayGame(replay, snap = null, map = null, mapFactory = d
   const game = new Game(field, replay.difficulty, leaders, snap, replay.levelId, replay.mode, {
     rngSeed: replay.seed,
     culture: replay.culture,
+    worldArmy: replay.worldArmy,
     ...(daily ? { daily } : {}),
   });
   return { game, map: field };
